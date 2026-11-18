@@ -148,34 +148,43 @@
           if (CV.HUD) CV.HUD.toast('Police helicopter overhead!');
         }
         heli.state = 'tracking';
-        var tx = px, tz = pz;
-        var hdx = tx - heli.x, hdz = tz - heli.z;
-        var hd = Math.sqrt(hdx * hdx + hdz * hdz);
-        if (hd > 4) {
-          var hs = Math.min(CV.TUNE.heliSpeed, hd * 1.5);
-          heli.x += (hdx / hd) * hs * dt;
-          heli.z += (hdz / hd) * hs * dt;
-        }
-        heli.mesh.position.set(heli.x, CV.TUNE.heliHeight + Math.sin(CV.G.time * 1.5) * 1.5, heli.z);
-        heli.mesh.rotation.y = Math.atan2(hdx, hdz);
-        heli.rotor.rotation.y += dt * 22;
-        // Sight: lost inside a cover zone, or far away for 8 seconds.
-        var inCover = CV.inCoverZone(px, pz);
-        if (inCover || hd > 130) {
-          heli.lostTimer += dt;
-          if (heli.lostTimer > 3) {
-            heli.state = 'off';
-            heli.mesh.visible = false;
-            CV.G.wanted = Math.max(0, CV.G.wanted - 2);
-            if (CV.HUD) CV.HUD.toast(inCover ? 'Lost the helicopter in cover!' : 'Lost the helicopter!');
-            CV.Audio.setRotor(false);
-          }
+        if (CV.G.freezeHeli) {
+          // Photo mode: hold the posed position so the helicopter stays in
+          // the frame instead of flying to hover right above the player.
+          heli.rotor.rotation.y += dt * 22;
+          CV.Audio.setRotor(true);
+          CV.G.heliActive = true;
+          heatLock = true;
         } else {
-          heli.lostTimer = 0;
-          heatLock = true;   // helicopter keeps the heat on
+          var tx = px, tz = pz;
+          var hdx = tx - heli.x, hdz = tz - heli.z;
+          var hd = Math.sqrt(hdx * hdx + hdz * hdz);
+          if (hd > 4) {
+            var hs = Math.min(CV.TUNE.heliSpeed, hd * 1.5);
+            heli.x += (hdx / hd) * hs * dt;
+            heli.z += (hdz / hd) * hs * dt;
+          }
+          heli.mesh.position.set(heli.x, CV.TUNE.heliHeight + Math.sin(CV.G.time * 1.5) * 1.5, heli.z);
+          heli.mesh.rotation.y = Math.atan2(hdx, hdz);
+          heli.rotor.rotation.y += dt * 22;
+          // Sight: lost inside a cover zone, or far away for 8 seconds.
+          var inCover = CV.inCoverZone(px, pz);
+          if (inCover || hd > 130) {
+            heli.lostTimer += dt;
+            if (heli.lostTimer > 3) {
+              heli.state = 'off';
+              heli.mesh.visible = false;
+              CV.G.wanted = Math.max(0, CV.G.wanted - 2);
+              if (CV.HUD) CV.HUD.toast(inCover ? 'Lost the helicopter in cover!' : 'Lost the helicopter!');
+              CV.Audio.setRotor(false);
+            }
+          } else {
+            heli.lostTimer = 0;
+            heatLock = true;   // helicopter keeps the heat on
+          }
+          CV.Audio.setRotor(true);
+          CV.G.heliActive = heli.state !== 'off';
         }
-        CV.Audio.setRotor(true);
-        CV.G.heliActive = heli.state !== 'off';
       } else if (heli.state !== 'off') {
         heli.state = 'off';
         heli.mesh.visible = false;

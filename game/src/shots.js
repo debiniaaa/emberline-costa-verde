@@ -68,9 +68,11 @@
         if (heli) {
           heli.state = 'tracking';
           heli.mesh.visible = true;
-          // Ahead of the player car so the helicopter reads in the frame.
-          heli.x = 12; heli.z = 45;
-          heli.mesh.position.set(12, CV.TUNE.heliHeight, 45);
+          // Ahead of the player car so the helicopter reads in the frame,
+          // held there for the whole posed scene (see freezeHeli).
+          heli.x = 14; heli.z = 90;
+          heli.mesh.position.set(14, CV.TUNE.heliHeight, 90);
+          CV.G.freezeHeli = true;
           CV.G.heliActive = true;
           CV.Audio.setRotor(true);
         }
