@@ -4,74 +4,45 @@
 [![rank](https://make.fun/badge/gta6-01/debiniaaa/emberline-costa-verde/rank.svg)](https://make.fun/bounty/gta6-01/leaderboard?utm_source=github&utm_medium=readme&utm_campaign=gta6-01)
 [![reward](https://make.fun/badge/gta6-01/debiniaaa/emberline-costa-verde/reward.svg)](https://make.fun/bounty/gta6-01?utm_source=github&utm_medium=readme&utm_campaign=gta6-01)
 
-An original open-world crime game for the make.fun gta6-01 bounty — built from
-scratch in this repository. No Rockstar / GTA names, characters, map, art or
-music: the city, people, vehicles, story and sounds are all original.
+An original open-world crime game for [make.fun's Make GTA 6 bounty](https://make.fun/bounty/gta6-01) — a full island city you can explore on foot and by car, built by an AI agent from scratch.
 
 ## The game
 
-Marina Sol returns to **Costa Verde**, a sun-soaked coastal city, to settle a
-score with Don Esteban Marlow — the man who burned her brother's garage.
-Fixer Rico Vega has the jobs; the city has the rest.
+Costa Verde is a sun-soaked island city ringed by sea: a downtown grid, beach resorts, a working port with cranes and containers, a marina full of boats, palm avenues and a lighthouse on its own little islet. Everything runs from static files in `game/` — no build step, no network, just open `index.html` through the included server.
 
-- **Open world on foot and by car** — a grid city of streets, towers, a plaza,
-  docks, a marina and a beach, explored in third person with a chase camera.
-- **Traffic and pedestrians** — cars cruise the avenues and stop for each
-  other; locals stroll the sidewalks and flee from gunfire.
-- **Car theft** — walk up to any car, press E, and it's yours. The cops notice.
-- **Wanted system, 1–5 stars** — crimes raise heat; police cruisers chase and
-  ram; at 3 stars a helicopter joins with a spotlight; get caught slow and
-  close and you're **busted**.
-- **Combat** — pistol (hitscan, tracers, muzzle flash) and fists, against
-  armed enemies who shoot back.
-- **Story: 8 missions** — First Wheels, Courier Run, Getaway Driver, The
-  Shakedown, Harbor Heist Setup, High-Speed Chase, The Informant, and the
-  Emberline Finale — with dialogue, objectives, timers, fail and retry.
-- **Side jobs** — taxi fares (T) and courier drops (C) for quick cash.
-- **HUD + minimap** — health, cash, wanted stars, mission tracker, timer,
-  speed, ammo, live minimap with blips, damage vignette and bust meter.
-- **Title screen, pause menu, save** — progress (cash, mission unlocks) saves
-  to localStorage; continue where you left off.
-- **Sound** — a synthesized sunset synthwave loop and effects (gunshots,
-  sirens, engine, crashes, jingles), all generated live with WebAudio.
-  No audio files.
+**What you can do:**
 
-## Controls
+- **Explore on foot and by car** — walk the sidewalks, then press `E` to steal any car you find and drive it.
+- **Live the city** — traffic follows the road grid, pedestrians stroll the sidewalks and run from trouble.
+- **Climb the wanted ladder (1–5 stars)** — theft, crashes, assaults and gunfire draw the police. Cruisers chase and ram you; a bust meter fills when they pin you down.
+- **Outrun the helicopter** — at 3 stars a police helicopter joins the chase with a searchlight and keeps the heat locked on. Break its sight in a cover zone (the causeway underpass, the port warehouse or the parking garage) or outrun it.
+- **Play an 8-mission story** — fixer Sol Vega and smuggler Marisol Reyes send you on timed deliveries, a coupe theft, a multi-stop courier run, a forced-heat getaway and a finale under four stars, with cash rewards and a pistol unlocked after the first job.
+- **Work side jobs** — taxi fares and courier deliveries at the gold markers around town.
+- **Fight back** — melee attacks and a pistol once unlocked, with health, hospital respawns and police fines.
+- **Keep your progress** — cash, story progress and the pistol are saved to localStorage.
 
-WASD / arrows move & drive · Shift sprint · mouse drag look · click shoot ·
-E steal/enter/exit car · F punch · Space jump / handbrake · 1/2 pistol/fists ·
-R buy ammo ($100) or retry mission · N next mission · T taxi · C courier ·
-P/Esc pause · M mute.
+Sound is fully synthesized in code (engine, sirens, rotor, gunshots, chimes, music) — there are no audio files.
 
-## Play it
+## How to play
 
-Serve `game/` with any static server and open `index.html` in desktop Chrome:
-
-```
-cd game && python3 -m http.server 8080
+```sh
+node serve.ts        # serves game/ on http://localhost:8080
 ```
 
-No network requests are made; Three.js is vendored under `game/vendor/`.
+Then open the page, click **START NEW GAME** (or **CONTINUE** if you have a save), and drive.
 
-## Layout
+**Controls:** WASD / arrows to move and drive · drag the mouse to look around · `E` enter / exit a car · `F` melee · click to shoot (once the pistol is unlocked) · `J` jobs · `P` / `Esc` pause.
 
-- `main.ts` — the entry program: copies `game/` + `screenshots/` to the
-  output dir and writes `dossier.json` via `vendor/makefun-game.ts`.
-- `game/index.html` — page shell, HUD, menus.
-- `game/src/config.js` — constants, story, mission definitions.
-- `game/src/world.js` — the city: streets, buildings, beach, ocean, plaza.
-- `game/src/vehicles.js` — car meshes, traffic AI, player car physics.
-- `game/src/pedestrians.js` — the people of Costa Verde.
-- `game/src/police.js` — wanted stars, cruisers, helicopter, bust meter.
-- `game/src/combat.js` — pistol, fists, armed enemies.
-- `game/src/missions.js` — story missions and side jobs.
-- `game/src/hud.js` — HUD, dialogue, banners, minimap.
-- `game/src/player.js` — Marina on foot.
-- `game/src/audio.js` — synthesized music and sound effects.
-- `game/src/main.js` — renderer, camera, input, state machine, game loop.
-- `game/src/shots.js` — screenshot scene presets and the automated playtest.
-- `game/vendor/three.module.min.js` — Three.js r160 (MIT), vendored.
+## Photo mode
 
-## License
+The game supports deterministic posed scenes for screenshots: open `?shot=cover`, `?shot=street`, `?shot=drive` or `?shot=chase` to jump straight into a staged scene.
 
-MIT — see `LICENSE`.
+## Structure
+
+- `game/index.html` — the page, HUD and menus
+- `game/src/` — one job per file: `config` (state + seeded RNG), `world` (island city), `vehicles` (cars + driving), `traffic` (AI cars), `pedestrians`, `police` (pursuit + helicopter), `player`, `combat`, `missions` (story + side jobs), `hud` (HUD + minimap), `audio` (synth sound), `save`, `shots` (photo mode), `main` (boot + loop)
+- `game/vendor/three.min.js` — three.js (vendored, minified)
+- `main.ts` — the entry program: copies `game/` and `screenshots/` and writes `dossier.json`
+- `screenshots/` — four real renders of the game
+
+Built with [make.fun](https://make.fun/?ref=gs2esb70) — an original game, no third-party IP.
