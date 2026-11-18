@@ -1,5 +1,9 @@
 # EMBERLINE: Costa Verde
 
+[![make.fun · gta6-01](https://make.fun/badge/gta6-01.svg)](https://make.fun/bounty/gta6-01?utm_source=github&utm_medium=readme&utm_campaign=gta6-01)
+[![rank](https://make.fun/badge/gta6-01/debiniaaa/emberline-costa-verde/rank.svg)](https://make.fun/bounty/gta6-01/leaderboard?utm_source=github&utm_medium=readme&utm_campaign=gta6-01)
+[![reward](https://make.fun/badge/gta6-01/debiniaaa/emberline-costa-verde/reward.svg)](https://make.fun/bounty/gta6-01?utm_source=github&utm_medium=readme&utm_campaign=gta6-01)
+
 An original open-world crime game for the make.fun gta6-01 bounty — built from
 scratch in this repository. No Rockstar / GTA names, characters, map, art or
 music: the city, people, vehicles, story and sounds are all original.
