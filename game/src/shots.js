@@ -61,14 +61,16 @@
           CV.Player.setCamera(0.35, 0.3, 13);
         }
         CV.G.wanted = 4;
-        spawnPoliceAt(-6, -14, 0);
-        spawnPoliceAt(7, -18, 0.2);
+        // One cruiser ahead-right (visible in frame) and one behind, closing in.
+        spawnPoliceAt(8, 25, Math.PI);
+        spawnPoliceAt(-7, -14, 0);
         var heli = CV.Police.heli;
         if (heli) {
           heli.state = 'tracking';
           heli.mesh.visible = true;
-          heli.x = 10; heli.z = -30;
-          heli.mesh.position.set(10, CV.TUNE.heliHeight, -30);
+          // Ahead of the player car so the helicopter reads in the frame.
+          heli.x = 12; heli.z = 45;
+          heli.mesh.position.set(12, CV.TUNE.heliHeight, 45);
           CV.G.heliActive = true;
           CV.Audio.setRotor(true);
         }
