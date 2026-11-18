@@ -1,101 +1,212 @@
-// EMBERLINE: Costa Verde — player.js
-// One job: Marina Sol on foot. WASD movement relative to the camera, sprint,
-// jump with gravity, entering and leaving cars, and the animated walker mesh.
+// EMBERLINE: Costa Verde — on-foot player, third-person camera, car
+// entry/exit, health and the wasted flow.
+(function () {
+  'use strict';
+  var CV = window.CV;
+  var THREE = window.THREE;
 
-import * as THREE from 'three';
-import { PLAYER } from './config.js';
-import { buildPersonMesh } from './pedestrians.js';
-import { resolveCircleCollision, clampToWorld } from './world.js';
+  var mesh = null, shadow = null;
+  var camYaw = 0, camPitch = 0.42, camDist = 11;
+  var keys = {};
+  var drag = { active: false, lx: 0, ly: 0 };
 
-export class PlayerController {
-  constructor(scene, world, state, audio) {
-    this.scene = scene;
-    this.world = world;
-    this.state = state;
-    this.audio = audio;
-    this.mesh = buildPersonMesh(0xe85d3d, 0xc98d64);
-    // Marina's look: red jacket, dark jeans, hair tied back.
-    this.mesh.userData.legL.material = new THREE.MeshLambertMaterial({ color: 0x2e3440 });
-    this.mesh.userData.legR.material = new THREE.MeshLambertMaterial({ color: 0x2e3440 });
-    this.scene.add(this.mesh);
-    this.pos = new THREE.Vector3(0, 0, 60);
-    this.vel = new THREE.Vector3();
-    this.heading = Math.PI;
-    this.verticalVel = 0;
-    this.onGround = true;
-    this.walkPhase = 0;
-    this.moving = false;
-    this.speed = 0;
+  function makePlayerMesh() {
+    var g = new THREE.Group();
+    var body = new THREE.Mesh(new THREE.BoxGeometry(0.75, 1.05, 0.42),
+      new THREE.MeshLambertMaterial({ color: 0x1f6f4a }));
+    body.position.y = 0.95;
+    g.add(body);
+    var jacket = new THREE.Mesh(new THREE.BoxGeometry(0.79, 0.4, 0.46),
+      new THREE.MeshLambertMaterial({ color: 0xd4a03c }));
+    jacket.position.y = 1.25;
+    g.add(jacket);
+    var head = new THREE.Mesh(new THREE.SphereGeometry(0.27, 10, 8),
+      new THREE.MeshLambertMaterial({ color: 0xe8b88a }));
+    head.position.y = 1.72;
+    g.add(head);
+    var cap = new THREE.Mesh(new THREE.CylinderGeometry(0.29, 0.29, 0.12, 10),
+      new THREE.MeshLambertMaterial({ color: 0x1a2a5a }));
+    cap.position.y = 1.92;
+    g.add(cap);
+    var legL = new THREE.Mesh(new THREE.BoxGeometry(0.26, 0.7, 0.26),
+      new THREE.MeshLambertMaterial({ color: 0x2c3e50 }));
+    legL.position.set(-0.18, 0.35, 0);
+    g.add(legL);
+    var legR = legL.clone();
+    legR.position.x = 0.18;
+    g.add(legR);
+    shadow = new THREE.Mesh(new THREE.CircleGeometry(0.55, 12),
+      new THREE.MeshBasicMaterial({ color: 0x000000, transparent: true, opacity: 0.25, depthWrite: false }));
+    shadow.rotation.x = -Math.PI / 2;
+    shadow.position.y = 0.02;
+    g.add(shadow);
+    return g;
   }
 
-  reset(x, z) {
-    this.pos.set(x, 0, z);
-    this.vel.set(0, 0, 0);
-    this.verticalVel = 0;
-    this.heading = Math.PI;
-    this.mesh.position.copy(this.pos);
-  }
-
-  update(dt, input, cameraHeading) {
-    if (this.state.playerCar.car) {
-      // Hidden while driving; the mesh rides with the car.
-      this.mesh.visible = false;
-      this.pos.copy(this.state.playerCar.car.mesh.position);
-      return;
-    }
-    this.mesh.visible = true;
-    let mx = 0; let mz = 0;
-    if (input.forward) { mx += Math.sin(cameraHeading); mz += Math.cos(cameraHeading); }
-    if (input.back) { mx -= Math.sin(cameraHeading); mz -= Math.cos(cameraHeading); }
-    if (input.left) { mx += Math.sin(cameraHeading - Math.PI / 2); mz += Math.cos(cameraHeading - Math.PI / 2); }
-    if (input.right) { mx += Math.sin(cameraHeading + Math.PI / 2); mz += Math.cos(cameraHeading + Math.PI / 2); }
-    const len = Math.hypot(mx, mz);
-    this.moving = len > 0;
-    const speed = input.sprint ? PLAYER.sprintSpeed : PLAYER.walkSpeed;
-    if (this.moving) {
-      mx /= len; mz /= len;
-      const targetHeading = Math.atan2(mx, mz);
-      let dh = targetHeading - this.heading;
-      while (dh > Math.PI) dh -= Math.PI * 2;
-      while (dh < -Math.PI) dh += Math.PI * 2;
-      this.heading += THREE.MathUtils.clamp(dh, -10 * dt, 10 * dt);
-      this.pos.x += mx * speed * dt;
-      this.pos.z += mz * speed * dt;
-      this.speed = speed;
-      this.walkPhase += dt * speed * 1.6;
-    } else {
-      this.speed = 0;
-      this.walkPhase += dt * 2;
-    }
-    // Jump + gravity.
-    if (input.jump && this.onGround) {
-      this.verticalVel = PLAYER.jumpSpeed;
-      this.onGround = false;
-    }
-    if (!this.onGround) {
-      this.verticalVel -= PLAYER.gravity * dt;
-      this.pos.y += this.verticalVel * dt;
-      if (this.pos.y <= 0) {
-        this.pos.y = 0;
-        this.verticalVel = 0;
-        this.onGround = true;
+  CV.Player = {
+    mesh: null,
+    keys: keys,
+    init: function () {
+      mesh = makePlayerMesh();
+      this.mesh = mesh;
+      CV.World.scene.add(mesh);
+      mesh.position.set(CV.G.playerPos.x, 0, CV.G.playerPos.z);
+      window.addEventListener('keydown', function (e) {
+        keys[e.code] = true;
+        if (e.code === 'KeyE') CV.Player.tryEnterExit();
+        if (e.code === 'KeyF') CV.Combat.melee();
+        if (e.code === 'KeyJ') CV.Missions.tryStartJob();
+        if (e.code === 'Escape' || e.code === 'KeyP') CV.HUD.togglePause();
+        if (['ArrowUp', 'ArrowDown', 'ArrowLeft', 'ArrowRight', 'Space'].indexOf(e.code) >= 0) e.preventDefault();
+      });
+      window.addEventListener('keyup', function (e) { keys[e.code] = false; });
+      var canvas = document.getElementById('game-canvas');
+      if (canvas) {
+        canvas.addEventListener('mousedown', function (e) {
+          drag.active = true; drag.lx = e.clientX; drag.ly = e.clientY;
+          CV.Audio.unlock();
+          if (CV.G.pistol && CV.G.mode === 'playing') CV.Combat.shoot(e.clientX, e.clientY);
+        });
+        window.addEventListener('mousemove', function (e) {
+          if (!drag.active) return;
+          camYaw -= (e.clientX - drag.lx) * 0.005;
+          camPitch = CV.clamp(camPitch + (e.clientY - drag.ly) * 0.004, 0.12, 1.1);
+          drag.lx = e.clientX; drag.ly = e.clientY;
+        });
+        window.addEventListener('mouseup', function () { drag.active = false; });
+        canvas.addEventListener('wheel', function (e) {
+          camDist = CV.clamp(camDist + (e.deltaY > 0 ? 1 : -1), 6, 20);
+          e.preventDefault();
+        }, { passive: false });
       }
-    }
-    resolveCircleCollision(this.pos, 0.7, this.world.colliders);
-    clampToWorld(this.pos, 6);
-    const swing = this.moving ? Math.sin(this.walkPhase) * 0.55 : Math.sin(this.walkPhase) * 0.05;
-    this.mesh.userData.legL.rotation.x = swing;
-    this.mesh.userData.legR.rotation.x = -swing;
-    this.mesh.userData.armL.rotation.x = -swing * 0.8;
-    this.mesh.userData.armR.rotation.x = swing * 0.8;
-    this.mesh.position.copy(this.pos);
-    this.mesh.rotation.y = this.heading;
-  }
-
-  // Aim direction for shooting: from the camera through the crosshair.
-  aimDirection(camera) {
-    const dir = new THREE.Vector3();
-    camera.getWorldDirection(dir);
-    return dir;
-  }
-}
+    },
+    setCamera: function (yaw, pitch, dist) { camYaw = yaw; camPitch = pitch; camDist = dist; },
+    getCamYaw: function () { return camYaw; },
+    // Returns {up,down,left,right} from WASD/arrows, camera-relative.
+    moveInput: function () {
+      return {
+        up: !!(keys['KeyW'] || keys['ArrowUp']),
+        down: !!(keys['KeyS'] || keys['ArrowDown']),
+        left: !!(keys['KeyA'] || keys['ArrowLeft']),
+        right: !!(keys['KeyD'] || keys['ArrowRight']),
+      };
+    },
+    update: function (dt) {
+      if (CV.G.mode !== 'playing') return;
+      var input = this.moveInput();
+      if (CV.G.driving) {
+        var hit = CV.Vehicles.drivePlayer(CV.G.driving, input, dt);
+        CV.G.playerPos.x = CV.G.driving.x;
+        CV.G.playerPos.z = CV.G.driving.z;
+        CV.G.playerHeading = CV.G.driving.heading;
+        CV.G.speed = CV.G.driving.speed;
+        if (hit && hit.type === 'wall') CV.Police.addHeat(0, '');
+        mesh.visible = false;
+        CV.Audio.setEngine(CV.G.driving.speed, CV.TUNE.carMaxSpeed, true);
+      } else {
+        var speed = (keys['ShiftLeft'] || keys['ShiftRight']) ? CV.TUNE.runSpeed : CV.TUNE.walkSpeed;
+        var mx = 0, mz = 0;
+        if (input.up) { mx += Math.sin(camYaw); mz += Math.cos(camYaw); }
+        if (input.down) { mx -= Math.sin(camYaw); mz -= Math.cos(camYaw); }
+        if (input.left) { mx += Math.sin(camYaw - Math.PI / 2); mz += Math.cos(camYaw - Math.PI / 2); }
+        if (input.right) { mx += Math.sin(camYaw + Math.PI / 2); mz += Math.cos(camYaw + Math.PI / 2); }
+        var len = Math.sqrt(mx * mx + mz * mz);
+        if (len > 0) {
+          mx /= len; mz /= len;
+          var nx = CV.G.playerPos.x + mx * speed * dt;
+          var nz = CV.G.playerPos.z + mz * speed * dt;
+          var col = CV.World.collide(nx, nz, 0.55);
+          if (col) { nx = col.x; nz = col.z; }
+          if (CV.World.inWater(nx, nz)) { nx = CV.G.playerPos.x; nz = CV.G.playerPos.z; }
+          CV.G.playerPos.x = nx; CV.G.playerPos.z = nz;
+          CV.G.playerHeading = CV.angleLerp(CV.G.playerHeading, Math.atan2(mx, mz), 1 - Math.pow(0.001, dt));
+          CV.G.speed = speed;
+        } else {
+          CV.G.speed = 0;
+        }
+        mesh.visible = true;
+        mesh.position.set(CV.G.playerPos.x, 0, CV.G.playerPos.z);
+        mesh.rotation.y = CV.G.playerHeading;
+        CV.Audio.setEngine(0, 1, false);
+      }
+      // Camera follow.
+      var cam = CV.World.camera;
+      if (cam) {
+        var tx = CV.G.playerPos.x, tz = CV.G.playerPos.z;
+        var cx = tx - Math.sin(camYaw) * Math.cos(camPitch) * camDist;
+        var cz = tz - Math.cos(camYaw) * Math.cos(camPitch) * camDist;
+        var cy = 2.2 + Math.sin(camPitch) * camDist;
+        cam.position.set(cx, cy, cz);
+        cam.lookAt(tx, 1.6, tz);
+      }
+    },
+    tryEnterExit: function () {
+      if (CV.G.mode !== 'playing') return;
+      if (CV.G.driving) {
+        var car = CV.G.driving;
+        CV.G.driving = null;
+        CV.G.playerPos.x = car.x + Math.sin(car.heading + Math.PI / 2) * 2.2;
+        CV.G.playerPos.z = car.z + Math.cos(car.heading + Math.PI / 2) * 2.2;
+        mesh.visible = true;
+        mesh.position.set(CV.G.playerPos.x, 0, CV.G.playerPos.z);
+        return;
+      }
+      var car2 = CV.Traffic.nearestStealable(CV.G.playerPos.x, CV.G.playerPos.z, 4);
+      if (car2) {
+        var wasParked = car2.driver === null;
+        car2.driver = 'player';
+        CV.G.driving = car2;
+        CV.G.speed = 0;
+        mesh.visible = false;
+        if (wasParked || car2.kind === 'civilian') {
+          // Stealing a car in view of peds or police raises heat.
+          var seen = false;
+          for (var i = 0; i < CV.Pedestrians.list.length; i++) {
+            var p = CV.Pedestrians.list[i];
+            if (CV.dist2d(p.x, p.z, car2.x, car2.z) < 24) { seen = true; break; }
+          }
+          if (seen || CV.Police.wantedCount() > 0) CV.Police.addHeat(1, 'car theft');
+        }
+        CV.Audio.unlock();
+      }
+    },
+    damage: function (amount, cause) {
+      if (CV.G.mode !== 'playing') return;
+      CV.G.health -= amount;
+      if (CV.G.health <= 0) {
+        CV.G.health = 0;
+        CV.G.mode = 'wasted';
+        CV.Audio.chime(false);
+        if (CV.HUD) CV.HUD.showWasted(cause || 'wasted');
+        CV.Police.clearAll();
+      }
+    },
+    heal: function (amount) {
+      CV.G.health = CV.clamp(CV.G.health + amount, 0, CV.TUNE.maxHealth);
+    },
+    respawnHospital: function () {
+      var fine = Math.min(150, Math.round(CV.G.cash * 0.1));
+      CV.G.cash -= fine;
+      CV.G.health = CV.TUNE.maxHealth;
+      CV.G.wanted = 0; CV.G.bust = 0;
+      CV.G.driving = null;
+      CV.G.playerPos.x = 40; CV.G.playerPos.z = 40; // hospital, downtown plaza edge
+      CV.G.playerHeading = 0;
+      mesh.visible = true;
+      mesh.position.set(40, 0, 40);
+      CV.G.mode = 'playing';
+      CV.Save.write();
+      if (CV.HUD) CV.HUD.toast('Hospital bill: $' + fine);
+    },
+    respawnPoliceStation: function () {
+      CV.G.health = CV.TUNE.maxHealth;
+      CV.G.driving = null;
+      CV.G.playerPos.x = -40; CV.G.playerPos.z = -40; // PD, downtown
+      CV.G.playerHeading = 0;
+      mesh.visible = true;
+      mesh.position.set(-40, 0, -40);
+      CV.G.mode = 'playing';
+      CV.Save.write();
+    },
+  };
+})();

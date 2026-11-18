@@ -5,181 +5,124 @@
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>EMBERLINE: Costa Verde</title>
 <style>
-  * { box-sizing: border-box; margin: 0; padding: 0; }
-  html, body { width: 100%; height: 100%; overflow: hidden; background: #1a1210;
-    font-family: 'Trebuchet MS', 'Segoe UI', Verdana, sans-serif; color: #fff; }
-  #game-canvas, #game-canvas canvas { position: fixed; inset: 0; display: block; }
-  .hidden { display: none !important; }
-
-  /* ---------- HUD ---------- */
-  #hud { position: fixed; inset: 0; pointer-events: none; z-index: 5; }
-  #top-right { position: absolute; top: 14px; right: 16px; text-align: right; }
-  #wanted-stars { font-size: 30px; letter-spacing: 2px; text-shadow: 0 2px 6px #000; }
-  #wanted-stars .star { color: rgba(255,255,255,.28); }
-  #wanted-stars .star.on { color: #ffd23a; }
-  #wanted-stars.hot { animation: pulse 0.9s infinite; }
-  @keyframes pulse { 50% { transform: scale(1.06); } }
-  #cash { font-size: 26px; font-weight: 800; color: #7dff8a; text-shadow: 0 2px 4px #000; margin-top: 2px; }
-  #mission-timer { display: none; font-size: 22px; font-weight: 800; color: #fff; text-shadow: 0 2px 4px #000; }
-  #mission-timer.urgent { color: #ff5040; }
-  #mission-tracker { position: absolute; top: 14px; left: 16px; max-width: 380px;
-    font-size: 17px; font-weight: 700; line-height: 1.35; text-shadow: 0 2px 4px #000;
-    background: rgba(10,10,16,.45); padding: 10px 12px; border-left: 4px solid #ffd23a; border-radius: 4px; }
-  #bottom-left { position: absolute; left: 16px; bottom: 16px; }
-  #health-row { display: flex; align-items: center; gap: 8px; }
-  #health-label { font-weight: 800; font-size: 14px; text-shadow: 0 2px 4px #000; }
-  #health-bar { width: 220px; height: 16px; background: rgba(0,0,0,.55); border: 2px solid #fff3; border-radius: 8px; overflow: hidden; }
-  #health-fill { height: 100%; width: 100%; background: linear-gradient(90deg,#37d67a,#7dff8a); transition: width .2s; }
-  #health-fill.low { background: linear-gradient(90deg,#d63a2a,#ff7a5c); }
-  #health-text { font-weight: 800; text-shadow: 0 2px 4px #000; }
-  #weapon-row { margin-top: 8px; font-size: 16px; font-weight: 700; text-shadow: 0 2px 4px #000; }
-  #weapon-row span { margin-right: 14px; }
-  #speed { position: absolute; right: 210px; bottom: 18px; font-size: 30px; font-weight: 800;
-    text-shadow: 0 2px 6px #000; color: #ffe9a8; }
-  #minimap-wrap { position: absolute; right: 16px; bottom: 16px; border: 3px solid rgba(255,255,255,.75);
-    border-radius: 50%; overflow: hidden; box-shadow: 0 4px 18px rgba(0,0,0,.6); background: #20262e; }
-  #minimap { display: block; width: 180px; height: 180px; }
-  #hint-bar { position: absolute; bottom: 16px; left: 50%; transform: translateX(-50%);
-    font-size: 14px; font-weight: 600; color: #ffe9a8; text-shadow: 0 2px 4px #000;
-    background: rgba(10,10,16,.4); padding: 6px 12px; border-radius: 20px; white-space: nowrap; }
-  #crosshair { position: absolute; left: 50%; top: 50%; width: 22px; height: 22px;
-    margin: -11px 0 0 -11px; font-size: 22px; line-height: 22px; text-align: center;
-    color: #fff; text-shadow: 0 0 4px #000; opacity: .85; }
-  #toast { position: absolute; top: 84px; left: 50%; transform: translateX(-50%);
-    font-size: 17px; font-weight: 700; padding: 9px 18px; border-radius: 6px;
-    background: rgba(10,10,16,.72); opacity: 0; transition: opacity .25s; white-space: nowrap; }
-  #toast.show { opacity: 1; }
-  #toast.good { border-left: 4px solid #37d67a; }
-  #toast.bad { border-left: 4px solid #ff5040; }
-  #toast.info { border-left: 4px solid #ffd23a; }
-  #banner { position: absolute; top: 26%; left: 50%; transform: translateX(-50%) scale(.96);
-    text-align: center; opacity: 0; transition: opacity .3s, transform .3s; }
-  #banner.show { opacity: 1; transform: translateX(-50%) scale(1); }
-  #banner-title { font-size: 44px; font-weight: 900; letter-spacing: 3px; color: #ffd23a;
-    text-shadow: 0 3px 0 #a33, 0 6px 18px #000; }
-  #banner-sub { font-size: 17px; margin-top: 6px; text-shadow: 0 2px 6px #000; max-width: 560px; }
-  #dialogue { position: absolute; bottom: 120px; left: 50%; transform: translateX(-50%);
-    width: 640px; max-width: 86vw; background: rgba(8,8,14,.78); border-radius: 8px;
-    padding: 12px 18px; opacity: 0; transition: opacity .3s; border-top: 3px solid #ff7a3c; }
-  #dialogue.show { opacity: 1; }
-  #dialogue-speaker { font-size: 14px; font-weight: 900; color: #ffd23a; letter-spacing: 1px; }
-  #dialogue-text { font-size: 17px; margin-top: 3px; line-height: 1.4; }
-  #damage-vignette { position: fixed; inset: 0; pointer-events: none; z-index: 6;
-    box-shadow: inset 0 0 120px 40px rgba(255,20,10,0); transition: box-shadow .18s; }
-  #damage-vignette.hit { box-shadow: inset 0 0 120px 40px rgba(255,20,10,.55); }
-  #bust-meter { display: none; position: absolute; top: 150px; left: 50%; transform: translateX(-50%);
-    width: 300px; text-align: center; font-weight: 800; text-shadow: 0 2px 4px #000; }
-  #bust-meter .bar { height: 12px; background: rgba(0,0,0,.6); border: 2px solid #fff; border-radius: 6px; overflow: hidden; margin-top: 4px; }
-  #bust-fill { height: 100%; width: 0; background: #3a86ff; }
-
-  /* ---------- Screens ---------- */
-  .screen { position: fixed; inset: 0; z-index: 10; display: flex; flex-direction: column;
-    align-items: center; justify-content: center; text-align: center; pointer-events: auto; }
-  #title-screen { background: linear-gradient(180deg, rgba(20,8,4,.25) 0%, rgba(20,8,4,.55) 55%, rgba(10,4,2,.85) 100%); }
-  .logo { font-size: 84px; font-weight: 900; letter-spacing: 6px; line-height: .95;
-    color: #ffd23a; text-shadow: 0 4px 0 #c23b2e, 0 10px 34px #000; }
-  .logo span { color: #ff7a3c; }
-  .tagline { font-size: 22px; letter-spacing: 8px; font-weight: 700; color: #fff; margin-top: 8px;
-    text-shadow: 0 2px 8px #000; }
-  .subtitle { font-size: 16px; color: #ffe9c9; margin-top: 14px; max-width: 620px; line-height: 1.5;
-    text-shadow: 0 2px 6px #000; }
-  .menu { margin-top: 28px; display: flex; flex-direction: column; gap: 12px; align-items: center; }
-  button { pointer-events: auto; cursor: pointer; font-family: inherit; font-size: 18px; font-weight: 800;
-    letter-spacing: 1px; color: #1a1210; background: #ffd23a; border: none; border-radius: 8px;
-    padding: 13px 34px; min-width: 280px; box-shadow: 0 4px 0 #a33, 0 8px 20px rgba(0,0,0,.5); }
-  button:hover { background: #ffe066; }
-  button.secondary { background: #e8e2d4; box-shadow: 0 4px 0 #888, 0 8px 20px rgba(0,0,0,.5); }
-  #save-note { margin-top: 16px; font-size: 14px; color: #ffe9a8; text-shadow: 0 2px 4px #000; }
-  #howto-panel { margin-top: 18px; background: rgba(8,8,14,.85); border-radius: 10px; padding: 16px 22px;
-    font-size: 15px; line-height: 1.8; text-align: left; max-width: 560px; }
-  #howto-panel b { color: #ffd23a; }
-  .credits { position: absolute; bottom: 14px; font-size: 13px; color: #fff9; text-shadow: 0 1px 4px #000; }
-  #pause-menu, #busted-screen, #gameover-screen { background: rgba(8,4,2,.72); display: none; }
-  #pause-menu.show, #busted-screen.show, #gameover-screen.show { display: flex; }
-  .screen h2 { font-size: 52px; font-weight: 900; letter-spacing: 4px; color: #ffd23a;
-    text-shadow: 0 4px 0 #a33, 0 8px 24px #000; }
-  .screen p { font-size: 17px; margin: 12px 0 6px; max-width: 520px; line-height: 1.5; }
-  #playtest, #errors { position: fixed; left: 4px; bottom: 4px; z-index: 50; font-size: 11px;
-    color: #fff; background: rgba(0,0,0,.4); padding: 2px 6px; max-width: 90vw; }
-  #errors { bottom: 22px; color: #ff9a8a; }
+  html, body { margin: 0; padding: 0; overflow: hidden; background: #1a1a22; font-family: 'Segoe UI', Arial, sans-serif; }
+  #game-canvas { display: block; width: 100vw; height: 100vh; }
+  #hud { display: none; position: fixed; inset: 0; pointer-events: none; color: #fff; }
+  .panel { background: rgba(10, 14, 20, 0.62); border: 1px solid rgba(255, 255, 255, 0.18); border-radius: 10px; padding: 8px 12px; }
+  #top-left { position: absolute; top: 12px; left: 12px; min-width: 210px; }
+  #health-bar { width: 180px; height: 12px; background: rgba(255,255,255,0.25); border-radius: 6px; overflow: hidden; margin: 4px 0; }
+  #health-fill { height: 100%; width: 100%; background: linear-gradient(90deg, #2ecc71, #a8e063); }
+  #cash-text { font-size: 20px; font-weight: bold; color: #7dff9a; }
+  #stars { font-size: 22px; letter-spacing: 3px; color: #ffd24a; margin-top: 2px; }
+  #bust-wrap { margin-top: 4px; display: none; }
+  #bust-bar { width: 180px; height: 8px; background: rgba(255,255,255,0.25); border-radius: 4px; overflow: hidden; }
+  #bust-fill { height: 100%; width: 0%; background: #ff3b30; }
+  #objective-box { position: absolute; top: 12px; left: 50%; transform: translateX(-50%); text-align: center; max-width: 520px; }
+  #objective { font-size: 16px; font-weight: bold; text-shadow: 0 1px 3px #000; }
+  #objective-dist { font-size: 13px; color: #ffd24a; text-shadow: 0 1px 3px #000; }
+  #minimap { position: absolute; right: 12px; bottom: 12px; border: 2px solid rgba(255,255,255,0.35); border-radius: 8px; background: #1d3a4a; }
+  #speed { position: absolute; right: 16px; bottom: 216px; font-size: 26px; font-weight: bold; text-shadow: 0 1px 4px #000; }
+  #toast { position: absolute; bottom: 90px; left: 50%; transform: translateX(-50%); font-size: 15px; background: rgba(10,14,20,0.75); padding: 8px 16px; border-radius: 20px; opacity: 0; transition: opacity 0.3s; white-space: nowrap; }
+  #banner { position: absolute; top: 34%; left: 50%; transform: translate(-50%, -50%); text-align: center; opacity: 0; transition: opacity 0.3s; }
+  #banner-title { font-size: 34px; font-weight: bold; color: #ffd24a; text-shadow: 0 2px 8px #000; }
+  #banner-sub { font-size: 18px; color: #fff; text-shadow: 0 1px 4px #000; }
+  #crosshair { position: absolute; left: 50%; top: 50%; width: 18px; height: 18px; margin: -9px 0 0 -9px; display: none; }
+  #crosshair:before, #crosshair:after { content: ''; position: absolute; background: #fff; }
+  #crosshair:before { left: 8px; top: 0; width: 2px; height: 18px; }
+  #crosshair:after { top: 8px; left: 0; width: 18px; height: 2px; }
+  #job-hint { position: absolute; bottom: 150px; left: 50%; transform: translateX(-50%); display: none; font-size: 14px; background: rgba(255,210,74,0.9); color: #222; padding: 6px 14px; border-radius: 16px; font-weight: bold; }
+  #controls-hint { position: absolute; left: 12px; bottom: 12px; font-size: 12px; color: rgba(255,255,255,0.75); text-shadow: 0 1px 2px #000; }
+  #title-overlay { display: none; position: absolute; top: 60px; left: 60px; pointer-events: none; }
+  #title-overlay h1 { margin: 0; font-size: 64px; letter-spacing: 4px; color: #fff; text-shadow: 0 3px 12px rgba(0,0,0,0.7); }
+  #title-overlay h1 span { color: #ff5a3c; }
+  #title-overlay p { margin: 4px 0 0 4px; font-size: 22px; letter-spacing: 6px; color: #ffd24a; text-shadow: 0 2px 6px #000; }
+  .overlay { position: fixed; inset: 0; display: flex; align-items: center; justify-content: center; flex-direction: column; background: linear-gradient(160deg, rgba(20,10,30,0.82), rgba(10,30,50,0.82)); color: #fff; z-index: 10; text-align: center; }
+  .overlay h1 { font-size: 56px; margin: 0 0 4px 0; letter-spacing: 4px; }
+  .overlay h1 span { color: #ff5a3c; }
+  .overlay h2 { font-size: 20px; letter-spacing: 8px; color: #ffd24a; margin: 0 0 18px 0; font-weight: normal; }
+  .overlay p { max-width: 560px; line-height: 1.5; margin: 6px 0; }
+  .overlay .keys { font-size: 13px; color: rgba(255,255,255,0.8); }
+  .overlay button { pointer-events: auto; margin: 10px 6px 0 6px; padding: 12px 26px; font-size: 16px; font-weight: bold; border: none; border-radius: 8px; background: #ff5a3c; color: #fff; cursor: pointer; }
+  .overlay button.secondary { background: rgba(255,255,255,0.2); }
+  .overlay button:hover { filter: brightness(1.15); }
+  #menu-save-info { color: #7dff9a; font-size: 14px; }
+  #pause-menu, #wasted-screen, #busted-screen { display: none; }
+  #wasted-screen h1 { color: #ff3b30; }
+  #busted-screen h1 { color: #5a8fd4; }
 </style>
-<script type="importmap">
-{ "imports": { "three": "./vendor/three.module.min.js" } }
-</script>
 </head>
 <body>
-<div id="game-canvas"></div>
-<div id="damage-vignette"></div>
+<canvas id="game-canvas"></canvas>
 
-<div id="hud" class="hidden">
-  <div id="mission-tracker">Free roam — press N for the next mission</div>
-  <div id="top-right">
-    <div id="wanted-stars"><span class="star">★</span><span class="star">★</span><span class="star">★</span><span class="star">★</span><span class="star">★</span></div>
-    <div id="cash">$250</div>
-    <div id="mission-timer"></div>
+<div id="hud">
+  <div id="top-left" class="panel">
+    <div>HEALTH <span id="health-text">100</span></div>
+    <div id="health-bar"><div id="health-fill"></div></div>
+    <div id="cash-text">$250</div>
+    <div id="stars">☆☆☆☆☆</div>
+    <div id="bust-wrap">BUSTED INCOMING<div id="bust-bar"><div id="bust-fill"></div></div></div>
   </div>
-  <div id="toast"></div>
-  <div id="banner"><div id="banner-title"></div><div id="banner-sub"></div></div>
-  <div id="bust-meter">BUSTED?<div class="bar"><div id="bust-fill"></div></div></div>
-  <div id="dialogue"><div id="dialogue-speaker"></div><div id="dialogue-text"></div></div>
-  <div id="crosshair">+</div>
-  <div id="bottom-left">
-    <div id="health-row"><span id="health-label">HEALTH</span>
-      <div id="health-bar"><div id="health-fill"></div></div><span id="health-text">100</span></div>
-    <div id="weapon-row"><span id="weapon">PISTOL [1]</span><span id="ammo">12 / ∞</span></div>
+  <div id="objective-box" class="panel">
+    <div id="objective"></div>
+    <div id="objective-dist"></div>
   </div>
   <div id="speed"></div>
-  <div id="minimap-wrap"><canvas id="minimap" width="180" height="180"></canvas></div>
-  <div id="hint-bar">WASD move · E steal car · Click shoot · F punch · N next mission</div>
+  <canvas id="minimap" width="190" height="190"></canvas>
+  <div id="toast"></div>
+  <div id="banner"><div id="banner-title"></div><div id="banner-sub"></div></div>
+  <div id="crosshair"></div>
+  <div id="job-hint">Press J — start this job</div>
+  <div id="controls-hint">WASD move · drag mouse to look · E enter/exit car · F melee · click shoot (pistol) · J jobs · P pause</div>
+  <div id="title-overlay"><h1>EMBER<span>LINE</span></h1><p>COSTA VERDE</p></div>
 </div>
 
-<div id="title-screen" class="screen">
-  <div class="logo">EMBER<span>LINE</span></div>
-  <div class="tagline">COSTA VERDE</div>
-  <div class="subtitle">Marina Sol came home to a city that owes her brother a garage.
-    Steal cars, outrun the law, run Rico Vega's jobs — and burn Don Marlow's empire to the ground.
-    An original open-world crime game: drive, fight, and climb from street hustler to legend.</div>
-  <div class="menu">
-    <button id="btn-new">▶ NEW GAME</button>
-    <button id="btn-continue" class="secondary" style="display:none">↻ CONTINUE</button>
-    <button id="btn-howto" class="secondary">HOW TO PLAY</button>
+<div id="menu" class="overlay">
+  <h1>EMBER<span>LINE</span></h1>
+  <h2>COSTA VERDE</h2>
+  <p>An island city of sun, sea and bad decisions. Sol Vega needs a driver, Marisol Reyes needs a smuggler, and the Costa Verde police need you — behind bars. Eight story missions, taxi and courier jobs, and a helicopter that never blinks.</p>
+  <p id="menu-save-info"></p>
+  <div>
+    <button id="btn-start">START NEW GAME</button>
+    <button id="btn-continue" class="secondary">CONTINUE</button>
   </div>
-  <div id="save-note"></div>
-  <div id="howto-panel" class="hidden">
-    <b>WASD / Arrows</b> — move / drive &nbsp;·&nbsp; <b>Shift</b> — sprint<br>
-    <b>Mouse drag</b> — look around &nbsp;·&nbsp; <b>Click</b> — shoot (pistol)<br>
-    <b>E</b> — steal / enter / exit car &nbsp;·&nbsp; <b>F</b> — punch &nbsp;·&nbsp; <b>Space</b> — jump / handbrake<br>
-    <b>1 / 2</b> — pistol / fists &nbsp;·&nbsp; <b>R</b> — buy ammo ($100) / retry mission<br>
-    <b>N</b> — next story mission &nbsp;·&nbsp; <b>T</b> — taxi job &nbsp;·&nbsp; <b>C</b> — courier job<br>
-    <b>P / Esc</b> — pause &nbsp;·&nbsp; <b>M</b> — mute &nbsp;·&nbsp; Progress saves automatically.
-  </div>
-  <div class="credits">EMBERLINE: Costa Verde — an original game. No Rockstar / GTA content. Three.js (MIT) vendored under game/vendor/.</div>
+  <p class="keys">WASD / arrows — move &amp; drive · mouse drag — look · E — enter / exit car · F — melee · click — shoot (after mission 1) · J — jobs · P / Esc — pause</p>
 </div>
 
-<div id="pause-menu" class="screen">
-  <h2>PAUSED</h2>
-  <p>Costa Verde waits for no one — except right now.</p>
-  <div class="menu">
+<div id="pause-menu" class="overlay">
+  <h1>PAUSED</h1>
+  <p>Costa Verde waits for no one. Well — right now it does.</p>
+  <div>
     <button id="btn-resume">RESUME</button>
-    <button id="btn-restart-mission" class="secondary">RESTART MISSION</button>
-    <button id="btn-quit-title" class="secondary">SAVE &amp; QUIT TO TITLE</button>
+    <button id="btn-restart" class="secondary">RESTART STORY</button>
   </div>
 </div>
 
-<div id="busted-screen" class="screen">
-  <h2>BUSTED</h2>
-  <p id="busted-text">Busted by the Costa Verde police.</p>
-  <div class="menu"><button id="btn-busted-ok">BACK ON THE STREETS</button></div>
+<div id="wasted-screen" class="overlay">
+  <h1>WASTED</h1>
+  <p id="wasted-sub">You got taken down. The hospital patches you up — for a fee.</p>
+  <div><button id="btn-hospital">GO TO HOSPITAL</button></div>
 </div>
 
-<div id="gameover-screen" class="screen">
-  <h2>FLATLINED</h2>
-  <p>Marina went down — but Costa Verde doesn't keep her down. The clinic patched her up; the mission failed.</p>
-  <div class="menu"><button id="btn-respawn">GET UP — RESPAWN</button></div>
+<div id="busted-screen" class="overlay">
+  <h1>BUSTED</h1>
+  <p id="busted-sub"></p>
+  <div><button id="btn-pd">LEAVE THE STATION</button></div>
 </div>
 
-<div id="playtest"></div>
-<div id="errors"></div>
-<script type="module" src="./src/main.js"></script>
+<script src="vendor/three.min.js"></script>
+<script src="src/config.js"></script>
+<script src="src/save.js"></script>
+<script src="src/audio.js"></script>
+<script src="src/world.js"></script>
+<script src="src/vehicles.js"></script>
+<script src="src/traffic.js"></script>
+<script src="src/pedestrians.js"></script>
+<script src="src/police.js"></script>
+<script src="src/player.js"></script>
+<script src="src/combat.js"></script>
+<script src="src/missions.js"></script>
+<script src="src/hud.js"></script>
+<script src="src/shots.js"></script>
+<script src="src/main.js"></script>
 </body>
 </html>

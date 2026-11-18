@@ -1,155 +1,114 @@
-// EMBERLINE: Costa Verde — pedestrians.js
-// One job: the people of Costa Verde. Walkers stroll the sidewalks, cross at
-// intersections, flee from gunfire, and can be intimidated for missions.
+// EMBERLINE: Costa Verde — pedestrians: sidewalk wanderers who flee
+// danger and witness crimes (which raises the wanted level).
+(function () {
+  'use strict';
+  var CV = window.CV;
+  var THREE = window.THREE;
 
-import * as THREE from 'three';
-import { PALETTE, mulberry32 } from './config.js';
-import { randomRoadPoint, nearestRoadPoint } from './world.js';
+  var peds = [];
+  var SHIRT = [0xd45a5a, 0x5a8fd4, 0x5aa03c, 0xe8d25a, 0x8e44ad, 0xecf0f1, 0x2e86c1];
 
-export function buildPersonMesh(shirtColor, skinColor = 0xd9a077) {
-  const person = new THREE.Group();
-  const shirt = new THREE.MeshLambertMaterial({ color: shirtColor });
-  const pants = new THREE.MeshLambertMaterial({ color: 0x2e3440 });
-  const skin = new THREE.MeshLambertMaterial({ color: skinColor });
-  const body = new THREE.Mesh(new THREE.BoxGeometry(0.55, 0.75, 0.32), shirt);
-  body.position.y = 1.05;
-  person.add(body);
-  const head = new THREE.Mesh(new THREE.BoxGeometry(0.34, 0.34, 0.34), skin);
-  head.position.y = 1.62;
-  person.add(head);
-  const hair = new THREE.Mesh(
-    new THREE.BoxGeometry(0.36, 0.14, 0.36),
-    new THREE.MeshLambertMaterial({ color: 0x1a1210 }),
-  );
-  hair.position.y = 1.82;
-  person.add(hair);
-  const legL = new THREE.Mesh(new THREE.BoxGeometry(0.2, 0.7, 0.22), pants);
-  legL.position.set(-0.14, 0.35, 0);
-  person.add(legL);
-  const legR = legL.clone();
-  legR.position.x = 0.14;
-  person.add(legR);
-  const armL = new THREE.Mesh(new THREE.BoxGeometry(0.16, 0.62, 0.18), shirt);
-  armL.position.set(-0.37, 1.05, 0);
-  person.add(armL);
-  const armR = armL.clone();
-  armR.position.x = 0.37;
-  person.add(armR);
-  person.userData.legL = legL;
-  person.userData.legR = legR;
-  person.userData.armL = armL;
-  person.userData.armR = armR;
-  return person;
-}
-
-export class PedestrianManager {
-  constructor(scene, world, state) {
-    this.scene = scene;
-    this.world = world;
-    this.state = state;
-    this.rng = mulberry32(4242);
-    this.peds = [];
-    this.targetCount = 22;
+  function makePedMesh(shirt) {
+    var g = new THREE.Group();
+    var body = new THREE.Mesh(new THREE.BoxGeometry(0.7, 1.1, 0.4),
+      new THREE.MeshLambertMaterial({ color: shirt }));
+    body.position.y = 0.95;
+    g.add(body);
+    var head = new THREE.Mesh(new THREE.SphereGeometry(0.28, 10, 8),
+      new THREE.MeshLambertMaterial({ color: 0xe8b88a }));
+    head.position.y = 1.75;
+    g.add(head);
+    var legL = new THREE.Mesh(new THREE.BoxGeometry(0.26, 0.7, 0.26),
+      new THREE.MeshLambertMaterial({ color: 0x2c3e50 }));
+    legL.position.set(-0.18, 0.35, 0);
+    g.add(legL);
+    var legR = legL.clone();
+    legR.position.x = 0.18;
+    g.add(legR);
+    var shadow = new THREE.Mesh(new THREE.CircleGeometry(0.5, 12),
+      new THREE.MeshBasicMaterial({ color: 0x000000, transparent: true, opacity: 0.22, depthWrite: false }));
+    shadow.rotation.x = -Math.PI / 2;
+    shadow.position.y = 0.02;
+    g.add(shadow);
+    return g;
   }
 
-  spawnPed(x, z, role = 'walker') {
-    const shirt = PALETTE.pedShirt[Math.floor(this.rng() * PALETTE.pedShirt.length)];
-    const mesh = buildPersonMesh(shirt);
-    mesh.position.set(x, 0, z);
-    this.scene.add(mesh);
-    const ped = {
-      mesh, x, z, role,
-      heading: this.rng() * Math.PI * 2,
-      speed: 1.2 + this.rng() * 1.4,
-      walkPhase: this.rng() * 6,
-      fleeing: 0,
-      scared: false,
-      intimidated: false,
-      target: null,
-      name: role === 'shopkeeper' ? 'SHOPKEEPER' : 'LOCAL',
-    };
-    this.peds.push(ped);
-    return ped;
-  }
-
-  seed(count) {
-    for (let i = 0; i < count; i++) {
-      const p = randomRoadPoint(this.rng);
-      const road = nearestRoadPoint(p.x, p.z);
-      const off = 8 + this.rng() * 4;
-      this.spawnPed(
-        road.axis === 'z' ? road.x + off : p.x,
-        road.axis === 'z' ? p.z : road.z + off,
-      );
-    }
-  }
-
-  removePed(ped) {
-    this.scene.remove(ped.mesh);
-    const i = this.peds.indexOf(ped);
-    if (i >= 0) this.peds.splice(i, 1);
-  }
-
-  scareAllNear(x, z, radius) {
-    for (const ped of this.peds) {
-      if (Math.hypot(ped.x - x, ped.z - z) < radius) {
-        ped.fleeing = 3 + this.rng() * 2;
-        ped.scared = true;
+  CV.Pedestrians = {
+    list: peds,
+    init: function (n) {
+      for (var i = 0; i < n; i++) {
+        var p = CV.World.randomSidewalkPoint();
+        var mesh = makePedMesh(SHIRT[i % SHIRT.length]);
+        mesh.position.set(p.x, 0, p.z);
+        CV.World.scene.add(mesh);
+        peds.push({
+          mesh: mesh, x: p.x, z: p.z, heading: CV.rand(0, Math.PI * 2),
+          speed: CV.rand(1.2, 2.4), state: 'walk', // walk | flee | down
+          downTimer: 0, fleeTimer: 0, target: CV.World.randomSidewalkPoint(),
+          witnessCooldown: 0, isPassenger: false,
+        });
       }
-    }
-  }
-
-  update(dt, playerPos) {
-    // Keep the crowd near the player.
-    for (const ped of [...this.peds]) {
-      if (ped.role !== 'walker') continue;
-      const dx = ped.x - playerPos.x;
-      const dz = ped.z - playerPos.z;
-      if (dx * dx + dz * dz > 260 * 260) {
-        this.removePed(ped);
-        const p = randomRoadPoint(this.rng);
-        const road = nearestRoadPoint(playerPos.x + (this.rng() - 0.5) * 260, playerPos.z + (this.rng() - 0.5) * 260);
-        this.spawnPed(road.axis === 'z' ? road.x + 9 : p.x, road.axis === 'z' ? p.z : road.z + 9);
+    },
+    update: function (dt, playerX, playerZ, danger) {
+      // danger: {x, z, radius} of a recent crime (gunshot / car hit), or null.
+      for (var i = 0; i < peds.length; i++) {
+        var p = peds[i];
+        if (p.state === 'down') {
+          p.downTimer -= dt;
+          p.mesh.rotation.x = -Math.PI / 2 * 0.9;
+          if (p.downTimer <= 0) { p.state = 'walk'; p.mesh.rotation.x = 0; }
+          continue;
+        }
+        var dPlayer = CV.dist2d(p.x, p.z, playerX, playerZ);
+        var flee = false;
+        if (danger && CV.dist2d(p.x, p.z, danger.x, danger.z) < danger.radius) flee = true;
+        if (dPlayer < 3.5 && CV.G.driving && Math.abs(CV.G.speed) > 6) flee = true;
+        if (flee) { p.state = 'flee'; p.fleeTimer = 2.5; }
+        if (p.state === 'flee') {
+          p.fleeTimer -= dt;
+          var away = Math.atan2(p.x - playerX, p.z - playerZ);
+          p.heading = CV.angleLerp(p.heading, away, 1 - Math.pow(0.01, dt));
+          p.x += Math.sin(p.heading) * 5.5 * dt;
+          p.z += Math.cos(p.heading) * 5.5 * dt;
+          if (p.fleeTimer <= 0) p.state = 'walk';
+        } else {
+          var tx = p.target.x - p.x, tz = p.target.z - p.z;
+          var td = Math.sqrt(tx * tx + tz * tz);
+          if (td < 1.5) { p.target = CV.World.randomSidewalkPoint(); }
+          else {
+            var want = Math.atan2(tx, tz);
+            p.heading = CV.angleLerp(p.heading, want, 1 - Math.pow(0.02, dt));
+            p.x += Math.sin(p.heading) * p.speed * dt;
+            p.z += Math.cos(p.heading) * p.speed * dt;
+          }
+        }
+        var col = CV.World.collide(p.x, p.z, 0.5);
+        if (col) { p.x = col.x; p.z = col.z; }
+        if (CV.World.inWater(p.x, p.z)) { p.x = CV.clamp(p.x, -250, 250); p.z = CV.clamp(p.z, -250, 250); }
+        p.mesh.position.set(p.x, 0, p.z);
+        p.mesh.rotation.y = p.heading;
+        // Witness: a ped close to a crime the player committed tells the cops.
+        if (p.witnessCooldown > 0) p.witnessCooldown -= dt;
+        if (danger && p.witnessCooldown <= 0 && CV.dist2d(p.x, p.z, danger.x, danger.z) < 26) {
+          p.witnessCooldown = 8;
+          CV.Police.addHeat(1, 'witnessed');
+        }
       }
-    }
-    while (this.peds.filter((p) => p.role === 'walker').length < this.targetCount) {
-      const road = nearestRoadPoint(playerPos.x + (this.rng() - 0.5) * 220, playerPos.z + (this.rng() - 0.5) * 220);
-      this.spawnPed(road.axis === 'z' ? road.x + 9 : road.x, road.axis === 'z' ? road.z : road.z + 9);
-    }
-    for (const ped of this.peds) {
-      if (ped.fleeing > 0) {
-        ped.fleeing -= dt;
-        const away = Math.atan2(ped.x - playerPos.x, ped.z - playerPos.z);
-        ped.heading = away;
-        const sp = 5.5;
-        ped.x += Math.sin(ped.heading) * sp * dt;
-        ped.z += Math.cos(ped.heading) * sp * dt;
-      } else if (ped.role === 'walker') {
-        if (this.rng() < dt * 0.05) ped.heading += (this.rng() - 0.5) * 1.6;
-        ped.x += Math.sin(ped.heading) * ped.speed * dt;
-        ped.z += Math.cos(ped.heading) * ped.speed * dt;
-        // Stay roughly on the sidewalk grid: drift back toward a road line.
-        const road = nearestRoadPoint(ped.x, ped.z);
-        const d = road.axis === 'z' ? Math.abs(ped.x - road.x) : Math.abs(ped.z - road.z);
-        if (d > 26) ped.heading += Math.PI * dt * 0.8;
+    },
+    knockDown: function (p, seconds) {
+      if (p.state === 'down') return;
+      p.state = 'down';
+      p.downTimer = seconds || 4;
+    },
+    nearest: function (x, z, range) {
+      var best = null, bd = range;
+      for (var i = 0; i < peds.length; i++) {
+        var p = peds[i];
+        if (p.state === 'down') continue;
+        var d = CV.dist2d(x, z, p.x, p.z);
+        if (d < bd) { bd = d; best = p; }
       }
-      ped.walkPhase += dt * (ped.fleeing > 0 ? 11 : 6);
-      const swing = Math.sin(ped.walkPhase) * 0.45;
-      ped.mesh.userData.legL.rotation.x = swing;
-      ped.mesh.userData.legR.rotation.x = -swing;
-      ped.mesh.userData.armL.rotation.x = -swing * 0.7;
-      ped.mesh.userData.armR.rotation.x = swing * 0.7;
-      ped.mesh.position.set(ped.x, 0, ped.z);
-      ped.mesh.rotation.y = ped.heading;
-    }
-  }
-
-  nearestPed(x, z, maxDist) {
-    let best = null; let bestD = maxDist;
-    for (const ped of this.peds) {
-      const d = Math.hypot(ped.x - x, ped.z - z);
-      if (d < bestD) { bestD = d; best = ped; }
-    }
-    return best;
-  }
-}
+      return best;
+    },
+  };
+})();

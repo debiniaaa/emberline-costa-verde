@@ -1,439 +1,275 @@
-// EMBERLINE: Costa Verde — missions.js
-// One job: the story. Eight story missions plus taxi and courier side jobs:
-// stages, markers, dialogue, timers, fail/retry, rewards and progression.
+// EMBERLINE: Costa Verde — 8-mission story chain plus repeatable
+// taxi and courier side jobs. One clear job per mission step; objective
+// text, a gold beacon and the minimap all point at the same target.
+(function () {
+  'use strict';
+  var CV = window.CV;
 
-import * as THREE from 'three';
-import { MISSIONS, DIALOGUE, SIDE_JOBS, mulberry32 } from './config.js';
-import { buildPersonMesh } from './pedestrians.js';
-import { nearestRoadPoint } from './world.js';
+  var MISSIONS = [
+    { id: 1, title: 'First Errand', giver: 'Sol Vega (fixer)',
+      brief: 'Pick up the package at the plaza, deliver it to the marina. Sol is watching.',
+      reward: 400,
+      steps: [
+        { type: 'goto', x: 40, z: 20, r: 5, label: 'Pick up the package at the plaza' },
+        { type: 'goto', x: -120, z: 200, r: 6, label: 'Deliver the package to the marina' },
+      ] },
+    { id: 2, title: 'The Coupe', giver: 'Marisol Reyes (smuggler)',
+      brief: 'A gold coupe is parked uptown. Take it — quietly — and bring it to the port warehouse.',
+      reward: 600,
+      steps: [
+        { type: 'steal', x: 120, z: -80, label: 'Steal the gold coupe uptown' },
+        { type: 'goto', x: 120, z: -148, r: 7, label: 'Deliver the coupe to the port warehouse' },
+      ] },
+    { id: 3, title: 'Hot Delivery', giver: 'Sol Vega (fixer)',
+      brief: 'Sixty seconds, cross-town, no excuses. The client pays double for speed.',
+      reward: 500,
+      steps: [
+        { type: 'goto', x: -80, z: 120, r: 5, label: 'Grab the parcel at the west garage' },
+        { type: 'goto', x: 120, z: 120, r: 6, label: 'Deliver across town — 60s!', timer: 60 },
+      ] },
+    { id: 4, title: 'Three Stops', giver: 'Marisol Reyes (smuggler)',
+      brief: 'Three drops, one route. Keep the engine warm and the cops cold.',
+      reward: 700,
+      steps: [
+        { type: 'goto', x: 0, z: -120, r: 5, label: 'Drop 1: north avenue' },
+        { type: 'goto', x: -120, z: 0, r: 5, label: 'Drop 2: west boulevard' },
+        { type: 'goto', x: 80, z: 160, r: 5, label: 'Drop 3: south marina road' },
+      ] },
+    { id: 5, title: 'Getaway Driver', giver: 'Sol Vega (fixer)',
+      brief: 'The meet went loud. Lose the heat and get to the causeway — alive.',
+      reward: 900,
+      steps: [
+        { type: 'goto', x: 40, z: -40, r: 5, label: 'Reach the meet point', heat: 3 },
+        { type: 'goto', x: 0, z: 196, r: 7, label: 'Escape to the causeway underpass' },
+      ] },
+    { id: 6, title: 'The Rival', giver: 'Marisol Reyes (smuggler)',
+      brief: 'Rook\'s crew wants a sit-down. Show up, hear them out, then vanish.',
+      reward: 1000,
+      steps: [
+        { type: 'goto', x: -160, z: 80, r: 5, label: 'Meet Rook\'s crew at the west docks' },
+        { type: 'wait', t: 5, label: 'Hear them out — stay put' },
+        { type: 'goto', x: 160, z: -160, r: 7, label: 'Leave — fast. Heat is coming.', heat: 2 },
+      ] },
+    { id: 7, title: 'Port Run', giver: 'Sol Vega (fixer)',
+      brief: 'A truckload of "spare parts" needs to be at the causeway in 75 seconds.',
+      reward: 1200,
+      steps: [
+        { type: 'steal', x: 160, z: -120, label: 'Take the marked truck at the port' },
+        { type: 'goto', x: 0, z: 196, r: 7, label: 'Deliver to the causeway — 75s!', timer: 75 },
+      ] },
+    { id: 8, title: 'The Finale', giver: 'Sol Vega (fixer)',
+      brief: 'One last job. Downtown, four stars, thirty seconds of thunder — then the lighthouse road.',
+      reward: 2000,
+      steps: [
+        { type: 'goto', x: 0, z: 0, r: 6, label: 'Reach downtown — heat is coming', heat: 4 },
+        { type: 'survive', t: 30, label: 'Survive the heat — 30s!' },
+        { type: 'goto', x: 200, z: -200, r: 8, label: 'Vanish down the lighthouse road' },
+      ] },
+  ];
 
-function makeBeacon() {
-  const group = new THREE.Group();
-  const beam = new THREE.Mesh(
-    new THREE.CylinderGeometry(1.1, 1.1, 60, 12, 1, true),
-    new THREE.MeshBasicMaterial({ color: 0xffd23a, transparent: true, opacity: 0.22, side: THREE.DoubleSide, depthWrite: false }),
-  );
-  beam.position.y = 30;
-  group.add(beam);
-  const diamond = new THREE.Mesh(
-    new THREE.OctahedronGeometry(1.4),
-    new THREE.MeshBasicMaterial({ color: 0xffd23a }),
-  );
-  diamond.position.y = 5;
-  group.add(diamond);
-  group.userData.diamond = diamond;
-  const ring = new THREE.Mesh(
-    new THREE.RingGeometry(2.4, 3.0, 24),
-    new THREE.MeshBasicMaterial({ color: 0xffd23a, transparent: true, opacity: 0.8, side: THREE.DoubleSide }),
-  );
-  ring.rotation.x = -Math.PI / 2;
-  ring.position.y = 0.12;
-  group.add(ring);
-  group.visible = false;
-  return group;
-}
+  var JOB_STANDS = [
+    { x: -40, z: -40, kind: 'taxi', label: 'Taxi stand' },
+    { x: 80, z: 40, kind: 'taxi', label: 'Taxi stand' },
+    { x: 152, z: -120, kind: 'courier', label: 'Courier depot' },
+  ];
 
-export class MissionManager {
-  constructor(scene, world, state, audio) {
-    this.scene = scene;
-    this.world = world;
-    this.state = state;
-    this.audio = audio;
-    this.rng = mulberry32(2026);
-    this.beacon = makeBeacon();
-    this.scene.add(this.beacon);
-    this.current = -1;          // index into MISSIONS, -1 = free roam
-    this.stageIndex = 0;
-    this.stageState = {};
-    this.timer = 0;
-    this.failed = false;
-    this.sideJob = null;        // { kind, stage, passenger, dest }
-    this.targetCar = null;
-    this.pickupMesh = null;
-    this.informant = null;
-    this.shopkeepers = [];
+  var current = null;    // {mission, step, timer, markedCar}
+  var job = null;        // {kind, phase, x, z, timer, pay, passenger}
+  var danger = null;
+
+  function missionDef(i) { return MISSIONS[i] || null; }
+
+  function setObjective(text, x, z) {
+    CV.G.objective = text;
+    CV.G.objectivePos = (x !== undefined && x !== null) ? { x: x, z: z } : null;
+    CV.World.setBeacon(x || 0, z || 0, x !== undefined && x !== null);
+    if (CV.HUD) CV.HUD.setObjective(text);
   }
 
-  get def() { return this.current >= 0 ? MISSIONS[this.current] : null; }
-  get stage() { return this.def ? this.def.stages[this.stageIndex] : null; }
-
-  missionTitle() {
-    if (this.sideJob) return SIDE_JOBS[this.sideJob.kind].text;
-    if (!this.def) return 'Free roam — press M for the next mission';
-    return `${this.def.title}: ${this.stageText()}`;
+  function startStep() {
+    var step = current.mission.steps[current.step];
+    current.timer = step.timer || 0;
+    current.waitLeft = step.t || 0;
+    if (step.heat) CV.G.wanted = Math.max(CV.G.wanted, step.heat);
+    if (step.type === 'steal') {
+      current.markedCar = CV.Vehicles.make(0xffd24a, step.x, step.z, 0, { kind: 'marked' });
+      current.markedCar.driver = null;
+      CV.Vehicles.parked.push(current.markedCar);
+      setObjective(step.label, step.x, step.z);
+    } else if (step.type === 'goto') {
+      setObjective(step.label, step.x, step.z);
+    } else if (step.type === 'wait' || step.type === 'survive') {
+      setObjective(step.label, null, null);
+    }
   }
 
-  stageText() {
-    const s = this.stage;
-    if (!s) return '';
-    if (s.type === 'kill') return s.text.replace(/\(\d+\/\d+\)/, `(${this.stageState.kills || 0}/${s.count})`);
-    if (s.type === 'intimidate') return s.text.replace(/\(\d+\/\d+\)/, `(${this.stageState.count || 0}/${s.count})`);
-    return s.text;
+  function completeStep() {
+    var step = current.mission.steps[current.step];
+    if (step.type === 'steal' && current.markedCar) {
+      current.markedCar.kind = 'civilian';
+    }
+    current.step++;
+    if (current.step >= current.mission.steps.length) {
+      completeMission();
+    } else {
+      startStep();
+    }
   }
 
-  startMission(index) {
-    const def = MISSIONS[index];
+  function completeMission() {
+    var m = current.mission;
+    CV.G.cash += m.reward;
+    CV.G.missionIndex++;
+    CV.Save.write();
+    if (CV.HUD) CV.HUD.showBanner('Mission complete: ' + m.title, '+$' + m.reward);
+    CV.Audio.chime(true);
+    if (m.id === 1 && !CV.G.pistol) {
+      CV.G.pistol = true;
+      CV.Save.write();
+      if (CV.HUD) CV.HUD.toast('Pistol unlocked — click to shoot!');
+    }
+    current = null;
+    if (CV.G.missionIndex >= MISSIONS.length) {
+      setObjective('Story complete — free roam! Take jobs at the gold markers.', null, null);
+      if (CV.HUD) CV.HUD.showBanner('STORY COMPLETE', 'Costa Verde is yours.');
+    } else {
+      startMission(CV.G.missionIndex);
+    }
+  }
+
+  function failMission(reason) {
+    if (CV.HUD) CV.HUD.showBanner('Mission failed', reason);
+    CV.Audio.chime(false);
+    if (current && current.markedCar) {
+      CV.Vehicles.remove(current.markedCar);
+      current.markedCar = null;
+    }
+    current = null;
+    startMission(CV.G.missionIndex);
+  }
+
+  function startMission(i) {
+    var def = missionDef(i);
     if (!def) return;
-    this.current = index;
-    this.stageIndex = 0;
-    this.stageState = {};
-    this.failed = false;
-    this.timer = def.timer || 0;
-    this.clearStageActors();
-    this.state.hud.showBanner(`MISSION ${def.id}: ${def.title}`, def.brief);
-    this.state.hud.showDialogue(DIALOGUE[`m${def.id}`] || []);
-    this.audio.missionStart();
-    this.setupStage();
-    this.state.save();
+    current = { mission: def, step: 0, timer: 0, waitLeft: 0, markedCar: null };
+    if (CV.HUD) CV.HUD.toast('New mission: ' + def.title + ' — ' + def.giver);
+    startStep();
   }
 
-  setupStage() {
-    const s = this.stage;
-    if (!s) return;
-    this.clearStageActors();
-    this.stageState = { kills: 0, count: 0, plant: 0, wave: 0 };
-    if (s.x !== undefined) this.placeBeacon(s.x, s.z);
-    else this.beacon.visible = false;
-    if (s.type === 'intimidate') this.spawnShopkeepers();
-    if (s.type === 'kill') this.spawnEnemyWave(s);
-    if (s.type === 'tail') this.spawnTargetCar();
-    if (s.type === 'stealCar' && s.truck) {
-      // Mission 5: park a hardware truck at the docks so the player is never
-      // stuck hunting for a rare truck in traffic.
-      this.state.traffic.spawnCar(240, 150, Math.PI, 'truck');
-      this.placeBeacon(240, 150);
-    }
-    if (s.type === 'goto' && this.current === 2) {
-      // Mission 3: Rico waits at the bank.
-      this.spawnRico();
-    }
-    if (s.type === 'goto' && this.current === 6) {
-      // Mission 7: the informant waits at the plaza.
-      this.spawnInformant();
-    }
-    if (this.current === 7 && s.type === 'survive') {
-      this.state.police.addHeat(5, 'finale');
-    }
-    if (this.current === 2 && s.type === 'survive') {
-      this.state.police.addHeat(2, 'getaway');
-    }
-  }
-
-  placeBeacon(x, z) {
-    this.beacon.position.set(x, 0, z);
-    this.beacon.visible = true;
-  }
-
-  clearStageActors() {
-    for (const sk of this.shopkeepers) this.state.peds.removePed(sk);
-    this.shopkeepers = [];
-    if (this.targetCar) {
-      this.state.traffic.removeCar(this.targetCar);
-      this.targetCar = null;
-    }
-    if (this.pickupMesh) {
-      this.scene.remove(this.pickupMesh);
-      this.pickupMesh = null;
-    }
-    if (this.informant) {
-      this.state.peds.removePed(this.informant);
-      this.informant = null;
-    }
-  }
-
-  spawnShopkeepers() {
-    // Shopkeepers wait on street corners, never inside a building.
-    const spots = [[-40, 6], [160, 40], [120, -154]];
-    for (const [x, z] of spots) {
-      const sk = this.state.peds.spawnPed(x, z, 'shopkeeper');
-      sk.name = 'SHOPKEEPER';
-      this.shopkeepers.push(sk);
-      this.state.hud.showMessage('A shopkeeper waits at the marked shop — lean on them', 'info');
-    }
-    this.placeBeacon(spots[0][0], spots[0][1]);
-  }
-
-  spawnEnemyWave(stage) {
-    const waveSize = stage.waves ? Math.ceil(stage.count / stage.waves) : stage.count;
-    const base = this.stage && this.stage.x !== undefined
-      ? { x: this.stage.x, z: this.stage.z }
-      : { x: this.state.player.pos.x + 20, z: this.state.player.pos.z + 20 };
-    const spots = this.current === 4
-      ? [[228, 148], [240, 160], [220, 168], [236, 140]]
-      : this.current === 6
-        ? [[-12, 8], [12, -8], [8, 14], [-14, -6], [0, 18], [18, 0]]
-        : [[252, 220], [268, 232], [244, 244], [260, 216], [232, 228], [276, 244], [248, 208], [224, 236]];
-    for (let i = 0; i < waveSize; i++) {
-      const [x, z] = spots[(this.stageState.wave * waveSize + i) % spots.length];
-      this.state.combat.spawnEnemy(x, z);
-    }
-    this.stageState.wave++;
-  }
-
-  spawnRico() {
-    const rico = this.state.peds.spawnPed(80, 40, 'rico');
-    rico.name = 'RICO VEGA';
-    this.state.hud.showMessage('Rico is waiting at the bank', 'info');
-  }
-
-  spawnInformant() {
-    this.informant = this.state.peds.spawnPed(0, 6, 'informant');
-    this.informant.name = 'THE INFORMANT';
-  }
-
-  spawnTargetCar() {
-    const car = this.state.traffic.spawnCar(160, 240, Math.PI / 2);
-    car.isTarget = true;
-    car.cruise = 20;
-    car.hp = 100;
-    this.targetCar = car;
-    this.state.hud.showMessage('There is the courier — run him off the road!', 'info');
-  }
-
-  advanceStage() {
-    this.stageIndex++;
-    if (this.stageIndex >= this.def.stages.length) {
-      this.completeMission();
-      return;
-    }
-    this.audio.pickup();
-    this.setupStage();
-  }
-
-  completeMission() {
-    const def = this.def;
-    this.state.cash += def.reward;
-    this.state.hud.showBanner(`MISSION COMPLETE — ${def.title}`, `+$${def.reward} — Rico will call with the next job.`);
-    this.state.hud.setCash(this.state.cash);
-    this.audio.missionComplete();
-    this.beacon.visible = false;
-    this.clearStageActors();
-    this.state.unlockedMission = Math.max(this.state.unlockedMission, this.current + 2);
-    this.current = -1;
-    this.stageIndex = 0;
-    this.state.save();
-  }
-
-  failMission(reason) {
-    if (this.current < 0 || this.failed) return;
-    this.failed = true;
-    this.audio.missionFail();
-    this.state.hud.showBanner('MISSION FAILED', `${reason} — press R to retry.`);
-    this.beacon.visible = false;
-    this.clearStageActors();
-  }
-
-  retryMission() {
-    if (!this.failed || this.current < 0) return;
-    const idx = this.current;
-    this.failed = false;
-    this.startMission(idx);
-  }
-
-  onEnemyKilled() {
-    const s = this.stage;
-    if (!s || s.type !== 'kill' || this.failed) return;
-    this.stageState.kills = (this.stageState.kills || 0) + 1;
-    if (s.waves && this.stageState.kills < s.count && this.stageState.kills % Math.ceil(s.count / s.waves) === 0) {
-      this.spawnEnemyWave(s);
-      this.state.hud.showMessage('More hitters incoming!', 'bad');
-    }
-    if (this.stageState.kills >= s.count) this.advanceStage();
-  }
-
-  onIntimidated(ped) {
-    const s = this.stage;
-    if (!s || s.type !== 'intimidate' || this.failed) return;
-    if (ped.role !== 'shopkeeper' || ped.intimidated) return;
-    ped.intimidated = true;
-    this.stageState.count = (this.stageState.count || 0) + 1;
-    this.state.cash += 150;
-    this.state.hud.setCash(this.state.cash);
-    this.state.hud.showMessage(`Shopkeeper paid up (+$150) — ${this.stageState.count}/${s.count}`, 'good');
-    this.audio.pickup();
-    const next = this.shopkeepers.find((k) => !k.intimidated);
-    if (next) this.placeBeacon(next.x, next.z);
-    if (this.stageState.count >= s.count) this.advanceStage();
-  }
-
-  onCarStolen(car) {
-    const s = this.stage;
-    if (!s || this.failed) return;
-    if (s.type === 'stealCar') {
-      if (s.truck && car.mesh.userData.kind !== 'truck') {
-        this.state.hud.showMessage('Rico needs the TRUCK, not that car', 'bad');
+  CV.Missions = {
+    list: MISSIONS,
+    stands: JOB_STANDS,
+    init: function () {
+      if (CV.G.missionIndex < MISSIONS.length) startMission(CV.G.missionIndex);
+      else setObjective('Story complete — free roam! Take jobs at the gold markers.', null, null);
+    },
+    onDanger: function (x, z, radius) {
+      danger = { x: x, z: z, radius: radius, until: CV.G.time + 3 };
+    },
+    getDanger: function () {
+      if (danger && CV.G.time < danger.until) return danger;
+      return null;
+    },
+    update: function (dt) {
+      var px = CV.G.playerPos.x, pz = CV.G.playerPos.z;
+      // Story mission.
+      if (current) {
+        var step = current.mission.steps[current.step];
+        if (step.timer) {
+          current.timer -= dt;
+          if (current.timer <= 0) { failMission('Out of time!'); return; }
+        }
+        if (step.type === 'goto') {
+          if (CV.dist2d(px, pz, step.x, step.z) < step.r) completeStep();
+        } else if (step.type === 'steal') {
+          if (CV.G.driving === current.markedCar) completeStep();
+        } else if (step.type === 'wait') {
+          current.waitLeft -= dt;
+          if (current.waitLeft <= 0) completeStep();
+        } else if (step.type === 'survive') {
+          current.waitLeft -= dt;
+          if (CV.G.wanted < 1) CV.G.wanted = 1;
+          if (current.waitLeft <= 0) completeStep();
+        }
+      }
+      // Side job.
+      if (job) {
+        if (job.timer > 0) {
+          job.timer -= dt;
+          if (job.timer <= 0) {
+            if (CV.HUD) CV.HUD.toast('Job failed — too slow.');
+            CV.Missions.endJob(false);
+            return;
+          }
+        }
+        if (job.phase === 'pickup') {
+          if (CV.dist2d(px, pz, job.x, job.z) < 5) {
+            job.phase = 'deliver';
+            var dest = CV.World.randomRoadPoint();
+            job.x = dest.x; job.z = dest.z;
+            setObjective(job.kind === 'taxi' ? 'Drive the passenger to the marker' : 'Deliver the package to the marker', job.x, job.z);
+            if (CV.HUD) CV.HUD.toast(job.kind === 'taxi' ? 'Passenger aboard!' : 'Package collected!');
+          }
+        } else if (job.phase === 'deliver') {
+          if (CV.dist2d(px, pz, job.x, job.z) < 6) {
+            CV.G.cash += job.pay;
+            CV.G.jobsDone++;
+            CV.Save.write();
+            if (CV.HUD) CV.HUD.showBanner('Job done', '+$' + job.pay);
+            CV.Audio.chime(true);
+            CV.Missions.endJob(true);
+            if (!current) setObjective('Free roam — take jobs at the gold markers.', null, null);
+          }
+        }
+      }
+      // Job stand proximity hint.
+      if (!job) {
+        for (var i = 0; i < JOB_STANDS.length; i++) {
+          var s = JOB_STANDS[i];
+          if (CV.dist2d(px, pz, s.x, s.z) < 6) {
+            CV.Missions.startJob(s.kind);
+            break;
+          }
+        }
+      }
+    },
+    startJob: function (kind) {
+      if (job) return;
+      var start = CV.World.randomRoadPoint();
+      job = {
+        kind: kind, phase: 'pickup',
+        x: start.x, z: start.z,
+        timer: kind === 'taxi' ? 50 : 70,
+        pay: kind === 'taxi' ? 150 : 120,
+      };
+      setObjective(kind === 'taxi' ? 'Pick up the passenger at the marker' : 'Pick up the package at the marker', job.x, job.z);
+      if (CV.HUD) CV.HUD.toast(kind === 'taxi' ? 'Taxi job started!' : 'Courier job started!');
+    },
+    endJob: function (done) {
+      job = null;
+      if (current) startStep();
+      else setObjective('Free roam — take jobs at the gold markers.', null, null);
+    },
+    tryStartJob: function () {
+      if (job) {
+        if (CV.HUD) CV.HUD.toast('Job already running — follow the gold marker.');
         return;
       }
-      this.advanceStage();
-    }
-  }
-
-  onEnterCar() {
-    const s = this.stage;
-    if (s && s.type === 'enterCar') this.advanceStage();
-  }
-
-  dropPickup(x, z) {
-    const mesh = new THREE.Mesh(
-      new THREE.BoxGeometry(0.9, 0.6, 0.3),
-      new THREE.MeshLambertMaterial({ color: 0x3a3a22 }),
-    );
-    mesh.position.set(x, 0.5, z);
-    this.scene.add(mesh);
-    this.pickupMesh = mesh;
-    this.placeBeacon(x, z);
-  }
-
-  // ---- side jobs ----
-  startSideJob(kind) {
-    if (this.sideJob || this.current >= 0) return;
-    // Snap the pickup point onto a road so a car can always reach it.
-    const p = nearestRoadPoint(this.state.player.pos.x + 40, this.state.player.pos.z + 30);
-    if (kind === 'taxi') {
-      const passenger = this.state.peds.spawnPed(p.x, p.z, 'fare');
-      passenger.name = 'FARE';
-      const dest = { x: -160 + Math.floor(this.rng() * 5) * 80, z: -160 + Math.floor(this.rng() * 5) * 80 };
-      this.sideJob = { kind, stage: 'pickup', passenger, dest };
-      this.placeBeacon(p.x, p.z);
-      this.state.hud.showMessage('Taxi fare waiting — pick them up in a car', 'info');
-    } else {
-      const dest = { x: -160 + Math.floor(this.rng() * 5) * 80, z: -160 + Math.floor(this.rng() * 5) * 80 };
-      this.sideJob = { kind, stage: 'pickup', parcel: p, dest };
-      this.placeBeacon(p.x, p.z);
-      this.state.hud.showMessage('Parcel waiting — grab it (walk or drive)', 'info');
-    }
-    this.audio.phoneRing();
-  }
-
-  finishSideJob() {
-    const job = this.sideJob;
-    if (!job) return;
-    const fare = SIDE_JOBS[job.kind].fare;
-    this.state.cash += fare;
-    this.state.hud.setCash(this.state.cash);
-    this.state.hud.showMessage(`${job.kind === 'taxi' ? 'Fare' : 'Delivery'} complete — +$${fare}`, 'good');
-    this.audio.missionComplete();
-    if (job.passenger) this.state.peds.removePed(job.passenger);
-    this.sideJob = null;
-    this.beacon.visible = false;
-    this.state.save();
-  }
-
-  update(dt) {
-    // Beacon spin.
-    if (this.beacon.visible) {
-      this.beacon.userData.diamond.rotation.y += dt * 2;
-      this.beacon.userData.diamond.position.y = 5 + Math.sin(performance.now() / 400) * 0.5;
-    }
-    if (this.timer > 0 && this.current >= 0 && !this.failed) {
-      this.timer -= dt;
-      this.state.hud.setTimer(this.timer);
-      if (this.timer <= 0) this.failMission('Out of time.');
-    }
-    // Side job stages.
-    if (this.sideJob) {
-      const job = this.sideJob;
-      const pp = this.state.player.pos;
-      if (job.stage === 'pickup') {
-        const tx = job.passenger ? job.passenger.x : job.parcel.x;
-        const tz = job.passenger ? job.passenger.z : job.parcel.z;
-        const inCar = !!this.state.playerCar.car;
-        if (Math.hypot(pp.x - tx, pp.z - tz) < 7 && (job.kind === 'courier' || inCar)) {
-          job.stage = 'deliver';
-          if (job.passenger) {
-            this.state.peds.removePed(job.passenger);
-            job.passenger = null;
-            this.state.hud.showMessage('Passenger aboard — drive to the marker', 'info');
-          } else {
-            this.state.hud.showMessage('Parcel collected — deliver it to the marker', 'info');
-          }
-          this.placeBeacon(job.dest.x, job.dest.z);
-        }
-      } else if (Math.hypot(pp.x - job.dest.x, pp.z - job.dest.z) < 9) {
-        this.finishSideJob();
+      var px = CV.G.playerPos.x, pz = CV.G.playerPos.z;
+      for (var i = 0; i < JOB_STANDS.length; i++) {
+        var s = JOB_STANDS[i];
+        if (CV.dist2d(px, pz, s.x, s.z) < 12) { this.startJob(s.kind); return; }
       }
-      return;
-    }
-    if (this.current < 0 || this.failed) return;
-    const s = this.stage;
-    if (!s) return;
-    const pp = this.state.player.pos;
-    const inCar = !!this.state.playerCar.car;
-    const dist = (x, z) => Math.hypot(pp.x - x, pp.z - z);
-    switch (s.type) {
-      case 'goto':
-        if (dist(s.x, s.z) < s.radius) {
-          if (this.current === 2) {
-            this.state.hud.showMessage('Rico is in — now lose the cops!', 'good');
-            const rico = this.state.peds.peds.find((p) => p.role === 'rico');
-            if (rico) this.state.peds.removePed(rico);
-          }
-          this.advanceStage();
-        }
-        break;
-      case 'driveTo':
-        this.state.__driveChecks = (this.state.__driveChecks || 0) + 1;
-        this.state.__lastDrive = { inCar, d: dist(s.x, s.z), r: s.radius, mode: this.state.mode, failed: this.failed };
-        if (inCar && dist(s.x, s.z) < s.radius) this.advanceStage();
-        break;
-      case 'deliver':
-        if (dist(s.x, s.z) < s.radius) this.advanceStage();
-        break;
-      case 'survive':
-        if (this.state.police.wanted === 0) this.advanceStage();
-        break;
-      case 'plant':
-        if (!inCar && dist(s.x, s.z) < s.radius) {
-          this.stageState.plant = (this.stageState.plant || 0) + dt;
-          this.state.hud.showMessage(`Planting charges… ${Math.ceil(s.seconds - this.stageState.plant)}s`, 'info');
-          if (this.stageState.plant >= s.seconds) this.advanceStage();
-        } else {
-          this.stageState.plant = 0;
-        }
-        break;
-      case 'tail': {
-        const t = this.targetCar;
-        if (!t) break;
-        // The courier flees along the coast road.
-        t.cruise = 22;
-        const dx = t.x - pp.x;
-        const dz = t.z - pp.z;
-        const d = Math.hypot(dx, dz);
-        if (inCar && d < 5 && Math.abs(this.state.playerCar.speed) > 8) {
-          t.hp -= dt * 60;
-          this.state.shake = Math.min(1, this.state.shake + 0.3);
-          if (t.hp <= 0) {
-            t.cruise = 0;
-            t.speed = 0;
-            this.dropPickup(t.x + 2, t.z + 2);
-            this.state.hud.showMessage('The courier stopped — grab the briefcase on foot', 'good');
-            this.audio.crash();
-            this.stageIndex++;
-            this.setupStagePickup();
-          }
-        }
-        break;
+      if (CV.HUD) CV.HUD.toast('No job here — find a gold marker (taxi stands, courier depot).');
+    },
+    resetOnDeath: function () {
+      // Wasted / busted during a mission: restart the current mission.
+      if (current) {
+        if (current.markedCar) { CV.Vehicles.remove(current.markedCar); current.markedCar = null; }
+        current = null;
+        startMission(CV.G.missionIndex);
       }
-      case 'pickup': {
-        if (!this.pickupMesh) break;
-        if (!inCar && dist(this.pickupMesh.position.x, this.pickupMesh.position.z) < 3) {
-          this.scene.remove(this.pickupMesh);
-          this.pickupMesh = null;
-          this.audio.pickup();
-          this.advanceStage();
-        }
-        break;
-      }
-      default:
-        break;
-    }
-  }
-
-  setupStagePickup() {
-    // After the tail stage, the next stage is 'pickup'; beacon is on the case.
-    const s = this.stage;
-    if (s && s.type === 'pickup') {
-      this.stageState = { kills: 0, count: 0, plant: 0, wave: 0 };
-    }
-  }
-}
+      if (job) { job = null; }
+    },
+  };
+})();

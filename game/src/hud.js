@@ -1,213 +1,192 @@
-// EMBERLINE: Costa Verde — hud.js
-// One job: everything the player reads. Health, cash, wanted stars, timer,
-// mission tracker, dialogue subtitles, toasts, banners, bust meter, and the
-// live minimap drawn on a 2D canvas.
+// EMBERLINE: Costa Verde — HUD, minimap, menus and banners (DOM overlay).
+(function () {
+  'use strict';
+  var CV = window.CV;
 
-import { WORLD } from './config.js';
+  var el = {};
+  var toastTimer = null, bannerTimer = null;
 
-export class HUD {
-  constructor(state) {
-    this.state = state;
-    this.el = {
-      stars: document.getElementById('wanted-stars'),
-      cash: document.getElementById('cash'),
-      healthFill: document.getElementById('health-fill'),
-      healthText: document.getElementById('health-text'),
-      mission: document.getElementById('mission-tracker'),
-      timer: document.getElementById('mission-timer'),
-      speed: document.getElementById('speed'),
-      ammo: document.getElementById('ammo'),
-      weapon: document.getElementById('weapon'),
-      toast: document.getElementById('toast'),
-      banner: document.getElementById('banner'),
-      bannerTitle: document.getElementById('banner-title'),
-      bannerSub: document.getElementById('banner-sub'),
-      dialogue: document.getElementById('dialogue'),
-      dialogueSpeaker: document.getElementById('dialogue-speaker'),
-      dialogueText: document.getElementById('dialogue-text'),
-      vignette: document.getElementById('damage-vignette'),
-      bust: document.getElementById('bust-meter'),
-      bustFill: document.getElementById('bust-fill'),
-      minimap: document.getElementById('minimap'),
-      hint: document.getElementById('hint-bar'),
-    };
-    this.mapCtx = this.el.minimap.getContext('2d');
-    this.toastTimer = null;
-    this.bannerTimer = null;
-    this.dialogueQueue = [];
-    this.dialogueTimer = 0;
-    this.message('Welcome to Costa Verde', 'info');
-  }
+  function $(id) { return document.getElementById(id); }
 
-  setStars(n) {
-    let html = '';
-    for (let i = 0; i < 5; i++) html += `<span class="star${i < n ? ' on' : ''}">★</span>`;
-    this.el.stars.innerHTML = html;
-    this.el.stars.classList.toggle('hot', n > 0);
-  }
+  CV.HUD = {
+    init: function () {
+      ['health-fill', 'health-text', 'cash-text', 'stars', 'objective', 'objective-dist',
+       'speed', 'minimap', 'toast', 'banner', 'banner-title', 'banner-sub',
+       'menu', 'pause-menu', 'wasted-screen', 'busted-screen', 'hud',
+       'btn-start', 'btn-continue', 'btn-new', 'btn-resume', 'btn-restart',
+       'btn-hospital', 'btn-pd', 'menu-save-info', 'crosshair', 'bust-fill', 'bust-wrap',
+       'job-hint'].forEach(function (id) { el[id] = $(id); });
 
-  setCash(n) { this.el.cash.textContent = `$${n.toLocaleString('en-US')}`; }
-
-  setHealth(hp) {
-    const pct = Math.max(0, Math.min(100, hp));
-    this.el.healthFill.style.width = `${pct}%`;
-    this.el.healthFill.classList.toggle('low', pct < 30);
-    this.el.healthText.textContent = `${Math.ceil(pct)}`;
-  }
-
-  setAmmo(ammo, weapon) {
-    this.el.ammo.textContent = weapon === 'pistol' ? `${ammo} / ∞` : '—';
-    this.el.weapon.textContent = weapon === 'pistol' ? 'PISTOL [1]' : 'FISTS [2]';
-  }
-
-  setSpeed(kmh, inCar) {
-    this.el.speed.textContent = inCar ? `${Math.round(kmh)} km/h` : '';
-  }
-
-  setTimer(seconds) {
-    if (seconds > 0) {
-      this.el.timer.style.display = 'block';
-      const m = Math.floor(seconds / 60);
-      const s = Math.floor(seconds % 60);
-      this.el.timer.textContent = `⏱ ${m}:${s.toString().padStart(2, '0')}`;
-      this.el.timer.classList.toggle('urgent', seconds < 20);
-    } else {
-      this.el.timer.style.display = 'none';
-    }
-  }
-
-  setBust(v) {
-    if (v > 0.02) {
-      this.el.bust.style.display = 'block';
-      this.el.bustFill.style.width = `${Math.min(100, v * 100)}%`;
-    } else {
-      this.el.bust.style.display = 'none';
-    }
-  }
-
-  setMissionText(text) { this.el.mission.textContent = text; }
-
-  setHint(text) { this.el.hint.textContent = text; }
-
-  message(text, kind = 'info') {
-    const t = this.el.toast;
-    t.textContent = text;
-    t.className = `show ${kind}`;
-    clearTimeout(this.toastTimer);
-    this.toastTimer = setTimeout(() => { t.className = ''; }, 3600);
-  }
-
-  showMessage(text, kind) { this.message(text, kind); }
-
-  showBanner(title, sub) {
-    this.el.bannerTitle.textContent = title;
-    this.el.bannerSub.textContent = sub || '';
-    this.el.banner.classList.add('show');
-    clearTimeout(this.bannerTimer);
-    this.bannerTimer = setTimeout(() => this.el.banner.classList.remove('show'), 3400);
-  }
-
-  showDialogue(lines) {
-    this.dialogueQueue = [...lines];
-    this.dialogueTimer = 0;
-    this.advanceDialogue();
-  }
-
-  advanceDialogue() {
-    const next = this.dialogueQueue.shift();
-    if (!next) {
-      this.el.dialogue.classList.remove('show');
-      return;
-    }
-    this.el.dialogueSpeaker.textContent = next[0];
-    this.el.dialogueText.textContent = next[1];
-    this.el.dialogue.classList.add('show');
-    this.dialogueTimer = 4.2;
-  }
-
-  flashDamage() {
-    this.el.vignette.classList.add('hit');
-    setTimeout(() => this.el.vignette.classList.remove('hit'), 180);
-  }
-
-  update(dt) {
-    if (this.dialogueTimer > 0) {
-      this.dialogueTimer -= dt;
-      if (this.dialogueTimer <= 0) this.advanceDialogue();
-    }
-    this.drawMinimap();
-  }
-
-  drawMinimap() {
-    const ctx = this.mapCtx;
-    const S = 180;
-    const scale = S / (WORLD.size + 60);
-    const toMap = (x, z) => [S / 2 + x * scale, S / 2 + z * scale];
-    ctx.clearRect(0, 0, S, S);
-    ctx.fillStyle = '#20262e';
-    ctx.fillRect(0, 0, S, S);
-    // Beach + ocean.
-    ctx.fillStyle = '#e8c98f';
-    ctx.fillRect(0, S / 2 + 300 * scale, S, 40 * scale);
-    ctx.fillStyle = '#1d6f8e';
-    ctx.fillRect(0, S / 2 + 340 * scale, S, S);
-    // Roads.
-    ctx.strokeStyle = '#565660';
-    ctx.lineWidth = 3;
-    const roads = [-320, -240, -160, -80, 0, 80, 160, 240, 320];
-    for (const r of roads) {
-      const [x] = toMap(r, 0);
-      ctx.beginPath(); ctx.moveTo(x, 0); ctx.lineTo(x, S); ctx.stroke();
-    }
-    for (const r of [-320, -240, -160, -80, 0, 80, 160, 240]) {
-      const [, y] = toMap(0, r);
-      ctx.beginPath(); ctx.moveTo(0, y); ctx.lineTo(S, y); ctx.stroke();
-    }
-    // Plaza.
-    ctx.fillStyle = '#7fa8c7';
-    const [px, py] = toMap(0, 0);
-    ctx.beginPath(); ctx.arc(px, py, 4, 0, Math.PI * 2); ctx.fill();
-    // Mission beacon.
-    const st = this.state;
-    if (st.missions && st.missions.beacon && st.missions.beacon.visible) {
-      const [bx, by] = toMap(st.missions.beacon.position.x, st.missions.beacon.position.z);
-      ctx.fillStyle = '#ffd23a';
-      ctx.beginPath(); ctx.arc(bx, by, 5, 0, Math.PI * 2); ctx.fill();
-      ctx.strokeStyle = '#ffd23a';
-      ctx.beginPath(); ctx.arc(bx, by, 8 + Math.sin(performance.now() / 300) * 2, 0, Math.PI * 2); ctx.stroke();
-    }
-    // Traffic dots.
-    if (st.traffic) {
-      ctx.fillStyle = '#cfd6dd';
-      for (const c of st.traffic.cars) {
-        if (c.isPlayer) continue;
-        const [cx, cy] = toMap(c.x, c.z);
-        ctx.fillRect(cx - 1, cy - 1, 2, 2);
+      if (el['btn-start']) el['btn-start'].addEventListener('click', function () { CV.Main.startGame(false); });
+      if (el['btn-continue']) el['btn-continue'].addEventListener('click', function () { CV.Main.startGame(true); });
+      if (el['btn-new']) el['btn-new'].addEventListener('click', function () { CV.Save.clear(); CV.Main.startGame(false); });
+      if (el['btn-resume']) el['btn-resume'].addEventListener('click', function () { CV.HUD.togglePause(); });
+      if (el['btn-restart']) el['btn-restart'].addEventListener('click', function () { CV.Main.restart(); });
+      if (el['btn-hospital']) el['btn-hospital'].addEventListener('click', function () { CV.Player.respawnHospital(); CV.HUD.hideOverlays(); });
+      if (el['btn-pd']) el['btn-pd'].addEventListener('click', function () { CV.Player.respawnPoliceStation(); CV.HUD.hideOverlays(); });
+      this.refreshMenu();
+    },
+    refreshMenu: function () {
+      if (el['menu-save-info']) {
+        var d = CV.Save.data;
+        el['menu-save-info'].textContent = d
+          ? ('Save found: $' + d.cash + ' · mission ' + (d.missionIndex + 1) + ' of 8' + (d.pistol ? ' · pistol unlocked' : ''))
+          : 'No save yet — a fresh start in Costa Verde.';
       }
-    }
-    // Police blips.
-    if (st.police) {
-      ctx.fillStyle = '#ff4040';
-      for (const c of st.police.cruisers) {
-        const [cx, cy] = toMap(c.x, c.z);
-        ctx.beginPath(); ctx.arc(cx, cy, 3, 0, Math.PI * 2); ctx.fill();
+      if (el['btn-continue']) el['btn-continue'].style.display = CV.Save.data ? 'inline-block' : 'none';
+    },
+    setObjective: function (text) {
+      if (el.objective) el.objective.textContent = text || '';
+    },
+    toast: function (msg) {
+      if (!el.toast) return;
+      el.toast.textContent = msg;
+      el.toast.style.opacity = '1';
+      if (toastTimer) clearTimeout(toastTimer);
+      toastTimer = setTimeout(function () { el.toast.style.opacity = '0'; }, 3200);
+    },
+    showBanner: function (title, sub) {
+      if (!el.banner) return;
+      el['banner-title'].textContent = title;
+      el['banner-sub'].textContent = sub || '';
+      el.banner.style.opacity = '1';
+      if (bannerTimer) clearTimeout(bannerTimer);
+      bannerTimer = setTimeout(function () { el.banner.style.opacity = '0'; }, 2600);
+    },
+    showWasted: function (cause) {
+      this.hideOverlays();
+      if (el['wasted-screen']) el['wasted-screen'].style.display = 'flex';
+    },
+    showBusted: function (fine) {
+      this.hideOverlays();
+      var sub = document.getElementById('busted-sub');
+      if (sub) sub.textContent = 'Fine paid: $' + fine + ' — the heat is off, for now.';
+      if (el['busted-screen']) el['busted-screen'].style.display = 'flex';
+    },
+    hideOverlays: function () {
+      ['menu', 'pause-menu', 'wasted-screen', 'busted-screen'].forEach(function (id) {
+        var n = $(id);
+        if (n) n.style.display = 'none';
+      });
+    },
+    showMenu: function () {
+      this.hideOverlays();
+      if (el.menu) el.menu.style.display = 'flex';
+      if (el.hud) el.hud.style.display = 'none';
+    },
+    showHud: function () {
+      this.hideOverlays();
+      if (el.hud) el.hud.style.display = 'block';
+    },
+    togglePause: function () {
+      if (CV.G.mode === 'playing') {
+        CV.G.mode = 'paused';
+        if (el['pause-menu']) el['pause-menu'].style.display = 'flex';
+      } else if (CV.G.mode === 'paused') {
+        CV.G.mode = 'playing';
+        if (el['pause-menu']) el['pause-menu'].style.display = 'none';
       }
-    }
-    // Player arrow.
-    const [ux, uy] = toMap(st.player.pos.x, st.player.pos.z);
-    ctx.save();
-    ctx.translate(ux, uy);
-    ctx.rotate(st.player.heading);
-    ctx.fillStyle = '#ffffff';
-    ctx.strokeStyle = '#111111';
-    ctx.lineWidth = 1;
-    ctx.beginPath();
-    ctx.moveTo(0, -7); ctx.lineTo(5, 6); ctx.lineTo(-5, 6); ctx.closePath();
-    ctx.fill(); ctx.stroke();
-    ctx.restore();
-    // North label.
-    ctx.fillStyle = '#ffffff';
-    ctx.font = 'bold 11px sans-serif';
-    ctx.fillText('N', S - 14, 14);
-  }
-}
+    },
+    update: function () {
+      if (!el.hud) return;
+      var hp = Math.round(CV.G.health);
+      if (el['health-fill']) el['health-fill'].style.width = hp + '%';
+      if (el['health-text']) el['health-text'].textContent = hp;
+      if (el['cash-text']) el['cash-text'].textContent = '$' + Math.round(CV.G.cash);
+      if (el.stars) {
+        var w = Math.floor(CV.G.wanted);
+        var s = '';
+        for (var i = 0; i < 5; i++) s += i < w ? '★' : '☆';
+        el.stars.textContent = s;
+        el.stars.style.color = w >= 3 ? '#ff5a3c' : '#ffd24a';
+      }
+      if (el['bust-wrap']) {
+        el['bust-wrap'].style.display = CV.G.bust > 0.02 ? 'block' : 'none';
+        if (el['bust-fill']) el['bust-fill'].style.width = Math.round(CV.G.bust * 100) + '%';
+      }
+      if (el.speed) {
+        el.speed.textContent = CV.G.driving ? Math.round(Math.abs(CV.G.speed) * 2.2) + ' MPH' : '';
+      }
+      if (el['objective-dist'] && CV.G.objectivePos) {
+        var d = Math.round(CV.dist2d(CV.G.playerPos.x, CV.G.playerPos.z, CV.G.objectivePos.x, CV.G.objectivePos.z));
+        el['objective-dist'].textContent = d + 'm';
+      } else if (el['objective-dist']) {
+        el['objective-dist'].textContent = '';
+      }
+      if (el.crosshair) {
+        el.crosshair.style.display = (CV.G.pistol && !CV.G.driving && CV.G.mode === 'playing') ? 'block' : 'none';
+      }
+      if (el['job-hint']) {
+        var near = false;
+        for (var i = 0; i < CV.Missions.stands.length; i++) {
+          var st = CV.Missions.stands[i];
+          if (CV.dist2d(CV.G.playerPos.x, CV.G.playerPos.z, st.x, st.z) < 7) { near = true; break; }
+        }
+        el['job-hint'].style.display = near ? 'block' : 'none';
+      }
+      this.drawMinimap();
+    },
+    drawMinimap: function () {
+      var c = el.minimap;
+      if (!c) return;
+      var g = c.getContext('2d');
+      var W = c.width, H = c.height;
+      var scale = W / 560;   // world -280..280
+      function wx(x) { return (x + 280) * scale; }
+      function wz(z) { return (z + 280) * scale; }
+      g.clearRect(0, 0, W, H);
+      g.fillStyle = '#1d3a4a';
+      g.fillRect(0, 0, W, H);
+      // Sand island.
+      g.fillStyle = '#c9b078';
+      g.fillRect(wx(-260), wz(-260), 520 * scale, 520 * scale);
+      // City slab.
+      g.fillStyle = '#8f959c';
+      g.fillRect(wx(-180), wz(-180), 360 * scale, 360 * scale);
+      // Roads.
+      g.strokeStyle = '#3a3f46';
+      g.lineWidth = 8 * scale;
+      CV.GRID.forEach(function (v) {
+        g.beginPath(); g.moveTo(wx(v), wz(-180)); g.lineTo(wx(v), wz(180)); g.stroke();
+        g.beginPath(); g.moveTo(wx(-180), wz(v)); g.lineTo(wx(180), wz(v)); g.stroke();
+      });
+      // Buildings.
+      g.fillStyle = '#5a5f66';
+      CV.World.buildings2d.forEach(function (b) {
+        g.fillRect(wx(b.x - b.w / 2), wz(b.z - b.d / 2), b.w * scale, b.d * scale);
+      });
+      // Job stands.
+      g.fillStyle = '#ffd24a';
+      CV.Missions.stands.forEach(function (s) {
+        g.beginPath(); g.arc(wx(s.x), wz(s.z), 3.5, 0, Math.PI * 2); g.fill();
+      });
+      // Objective.
+      if (CV.G.objectivePos) {
+        g.fillStyle = '#ffd24a';
+        g.beginPath(); g.arc(wx(CV.G.objectivePos.x), wz(CV.G.objectivePos.z), 5, 0, Math.PI * 2); g.fill();
+        g.strokeStyle = '#ffffff';
+        g.lineWidth = 1.5;
+        g.beginPath(); g.arc(wx(CV.G.objectivePos.x), wz(CV.G.objectivePos.z), 8, 0, Math.PI * 2); g.stroke();
+      }
+      // Police cars (red), helicopter (orange).
+      g.fillStyle = '#ff3b30';
+      CV.Police.cars.forEach(function (car) {
+        g.beginPath(); g.arc(wx(car.x), wz(car.z), 3, 0, Math.PI * 2); g.fill();
+      });
+      if (CV.G.heliActive && CV.Police.heli && CV.Police.heli.mesh.visible) {
+        g.fillStyle = '#ff8c00';
+        g.beginPath(); g.arc(wx(CV.Police.heli.x), wz(CV.Police.heli.z), 4, 0, Math.PI * 2); g.fill();
+      }
+      // Player arrow.
+      var px = wx(CV.G.playerPos.x), pz = wz(CV.G.playerPos.z);
+      g.save();
+      g.translate(px, pz);
+      g.rotate(-CV.G.playerHeading + Math.PI);
+      g.fillStyle = '#ffffff';
+      g.beginPath();
+      g.moveTo(0, -6); g.lineTo(4.5, 5); g.lineTo(-4.5, 5); g.closePath();
+      g.fill();
+      g.restore();
+    },
+  };
+})();

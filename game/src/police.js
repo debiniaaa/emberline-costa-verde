@@ -1,219 +1,208 @@
-// EMBERLINE: Costa Verde — police.js
-// One job: the law. Wanted stars, heat and decay, police cruisers that chase
-// and ram, the bust meter, and the police helicopter at three stars and up.
+// EMBERLINE: Costa Verde — wanted system, ground pursuit, bust meter
+// and the police helicopter (3+ stars). The helicopter tracks the player
+// from above and keeps the heat locked while it has sight; the player
+// breaks sight by hiding in a cover zone (causeway underpass, port
+// warehouse, parking garage) or by getting far away for 8 seconds.
+(function () {
+  'use strict';
+  var CV = window.CV;
+  var THREE = window.THREE;
 
-import * as THREE from 'three';
-import { WANTED, mulberry32 } from './config.js';
-import { buildCarMesh } from './vehicles.js';
-import { randomRoadPoint, nearestRoadPoint } from './world.js';
+  var policeCars = [];
+  var heli = null;       // {mesh, rotor, light, state, lostTimer}
+  var heatLock = false;
+  var spawnTimer = 0;
 
-export class PoliceManager {
-  constructor(scene, world, state, audio) {
-    this.scene = scene;
-    this.world = world;
-    this.state = state;
-    this.audio = audio;
-    this.rng = mulberry32(99);
-    this.stars = 0;
-    this.heat = 0;               // 0..1 within the current star level
-    this.timeSinceCrime = 99;
-    this.bust = 0;               // 0..1 bust meter
-    this.cruisers = [];
-    this.heli = null;
-    this.heliLight = null;
-    this.sirenOn = false;
+  function makeHeli() {
+    var g = new THREE.Group();
+    var body = new THREE.Mesh(new THREE.BoxGeometry(3.2, 1.6, 6.5),
+      new THREE.MeshLambertMaterial({ color: 0x1a2a5a }));
+    body.position.y = 0;
+    g.add(body);
+    var tail = new THREE.Mesh(new THREE.BoxGeometry(0.8, 0.8, 5),
+      new THREE.MeshLambertMaterial({ color: 0x1a2a5a }));
+    tail.position.set(0, 0.3, -5.2);
+    g.add(tail);
+    var glass = new THREE.Mesh(new THREE.BoxGeometry(2.6, 1.0, 1.8),
+      new THREE.MeshLambertMaterial({ color: 0x9fd4e8 }));
+    glass.position.set(0, 0.4, 2.2);
+    g.add(glass);
+    var rotor = new THREE.Mesh(new THREE.BoxGeometry(9, 0.12, 0.5),
+      new THREE.MeshLambertMaterial({ color: 0x222222 }));
+    rotor.position.y = 1.1;
+    g.add(rotor);
+    var tailRotor = new THREE.Mesh(new THREE.BoxGeometry(0.12, 2.2, 0.5),
+      new THREE.MeshLambertMaterial({ color: 0x222222 }));
+    tailRotor.position.set(0.5, 0.5, -7.4);
+    g.add(tailRotor);
+    // Searchlight cone.
+    var cone = new THREE.Mesh(
+      new THREE.ConeGeometry(7, 40, 16, 1, true),
+      new THREE.MeshBasicMaterial({ color: 0xfff2b0, transparent: true, opacity: 0.16, side: THREE.DoubleSide, depthWrite: false }));
+    cone.position.y = -20;
+    cone.rotation.x = Math.PI;
+    g.add(cone);
+    g.visible = false;
+    CV.World.scene.add(g);
+    return { mesh: g, rotor: rotor, cone: cone, state: 'off', lostTimer: 0, x: 0, z: 0 };
   }
 
-  get wanted() { return this.stars; }
-
-  addHeat(amount, reason) {
-    if (amount <= 0) return;
-    this.heat += amount;
-    this.timeSinceCrime = 0;
-    while (this.heat >= 1 && this.stars < 5) {
-      this.heat -= 1;
-      this.stars++;
-      this.state.hud.showMessage(`WANTED LEVEL ${this.stars} — the Costa Verde police are coming`, 'bad');
-      this.audio.phoneRing();
-    }
-    if (this.stars >= 5) this.heat = 1;
-    this.state.hud.setStars(this.stars);
-  }
-
-  clearWanted() {
-    this.stars = 0;
-    this.heat = 0;
-    this.bust = 0;
-    this.state.hud.setStars(0);
-    this.despawnAll();
-  }
-
-  buildHelicopter() {
-    const heli = new THREE.Group();
-    const body = new THREE.Mesh(
-      new THREE.BoxGeometry(2.2, 1.4, 4.4),
-      new THREE.MeshLambertMaterial({ color: 0x1c2a44 }),
-    );
-    heli.add(body);
-    const glass = new THREE.Mesh(
-      new THREE.BoxGeometry(2.0, 0.9, 1.4),
-      new THREE.MeshLambertMaterial({ color: 0x9fd8ff }),
-    );
-    glass.position.set(0, 0.2, 1.6);
-    heli.add(glass);
-    const tail = new THREE.Mesh(
-      new THREE.BoxGeometry(0.5, 0.5, 3.6),
-      new THREE.MeshLambertMaterial({ color: 0x1c2a44 }),
-    );
-    tail.position.set(0, 0.3, -3.6);
-    heli.add(tail);
-    const rotor = new THREE.Mesh(
-      new THREE.BoxGeometry(9, 0.08, 0.5),
-      new THREE.MeshLambertMaterial({ color: 0x222226 }),
-    );
-    rotor.position.y = 1.0;
-    heli.add(rotor);
-    heli.userData.rotor = rotor;
-    const skidL = new THREE.Mesh(new THREE.BoxGeometry(0.2, 0.2, 3), new THREE.MeshLambertMaterial({ color: 0x111111 }));
-    skidL.position.set(-0.9, -0.9, 0);
-    heli.add(skidL);
-    const skidR = skidL.clone();
-    skidR.position.x = 0.9;
-    heli.add(skidR);
-    const spot = new THREE.SpotLight(0xfff2b0, 900, 120, 0.35, 0.5, 1.2);
-    spot.position.set(0, -0.5, 0);
-    heli.add(spot);
-    heli.add(spot.target);
-    spot.target.position.set(0, -40, 0);
-    this.heliLight = spot;
-    return heli;
-  }
-
-  spawnCruiser(x, z) {
-    const mesh = buildCarMesh(0xf2f2f2, 'police');
-    mesh.position.set(x, 0, z);
-    this.scene.add(mesh);
-    const cruiser = {
-      mesh, x, z, heading: 0, speed: 0,
-      cruise: 26,
-      isPlayer: false, isPolice: true, isTarget: false,
-      sirenPhase: this.rng() * 6,
-    };
-    this.cruisers.push(cruiser);
-    this.state.traffic.cars.push(cruiser);
-    return cruiser;
-  }
-
-  despawnAll() {
-    for (const c of [...this.cruisers]) {
-      this.scene.remove(c.mesh);
-      const i = this.state.traffic.cars.indexOf(c);
-      if (i >= 0) this.state.traffic.cars.splice(i, 1);
-    }
-    this.cruisers = [];
-    if (this.heli) {
-      this.scene.remove(this.heli);
-      this.heli = null;
-      this.heliLight = null;
-    }
-    if (this.sirenOn) { this.audio.stopSiren(); this.sirenOn = false; }
-  }
-
-  update(dt, playerPos, playerSpeed, playerInCar) {
-    this.timeSinceCrime += dt;
-    // Wanted decays when the player stays clean and out of sight.
-    if (this.stars > 0 && this.timeSinceCrime > WANTED.decayDelay) {
-      this.heat -= dt / WANTED.decayStep;
-      if (this.heat < 0 && this.stars > 0) {
-        this.stars--;
-        this.heat = this.stars > 0 ? 0.99 : 0;
-        this.state.hud.setStars(this.stars);
-        if (this.stars === 0) {
-          this.state.hud.showMessage('You lost the cops. Costa Verde forgets — for now.', 'good');
-          this.despawnAll();
+  CV.Police = {
+    cars: policeCars,
+    heli: null,
+    init: function () {
+      heli = makeHeli();
+      this.heli = heli;
+    },
+    addHeat: function (n, reason) {
+      if (CV.G.mode !== 'playing') return;
+      var before = CV.G.wanted;
+      CV.G.wanted = CV.clamp(CV.G.wanted + n, 0, 5);
+      if (CV.G.wanted > before && CV.HUD) CV.HUD.toast('Wanted level up — ' + reason);
+      CV.G.bust = 0;
+    },
+    wantedCount: function () { return Math.floor(CV.G.wanted); },
+    spawnPoliceCar: function () {
+      var p = CV.World.randomRoadPoint();
+      var tries = 0;
+      while (CV.dist2d(p.x, p.z, CV.G.playerPos.x, CV.G.playerPos.z) < 60 && tries < 8) {
+        p = CV.World.randomRoadPoint(); tries++;
+      }
+      var car = CV.Vehicles.make(0x1a2a5a, p.x, p.z, 0, { police: true, kind: 'police' });
+      car.driver = 'police';
+      car.health = 100;
+      policeCars.push(car);
+      return car;
+    },
+    update: function (dt) {
+      var wanted = this.wantedCount();
+      // Spawn / despawn ground units to match wanted level.
+      var wantCars = wanted === 0 ? 0 : Math.min(1 + wanted, 5);
+      spawnTimer -= dt;
+      if (policeCars.length < wantCars && spawnTimer <= 0) {
+        this.spawnPoliceCar();
+        spawnTimer = 2.5;
+      }
+      if (wanted === 0) {
+        for (var i = policeCars.length - 1; i >= 0; i--) {
+          var pc = policeCars[i];
+          var d = CV.dist2d(pc.x, pc.z, CV.G.playerPos.x, CV.G.playerPos.z);
+          if (d > 220) { CV.Vehicles.remove(pc); policeCars.splice(i, 1); }
         }
       }
-    }
-
-    const wantCruisers = this.stars === 0 ? 0 : Math.min(2 + this.stars, WANTED.maxPoliceCars);
-    while (this.cruisers.length < wantCruisers) {
-      const p = randomRoadPoint(this.rng);
-      const near = nearestRoadPoint(playerPos.x + (this.rng() - 0.5) * 120, playerPos.z + (this.rng() - 0.5) * 120);
-      this.spawnCruiser(near.x, near.z);
-    }
-    while (this.cruisers.length > wantCruisers) {
-      const c = this.cruisers.pop();
-      this.scene.remove(c.mesh);
-      const i = this.state.traffic.cars.indexOf(c);
-      if (i >= 0) this.state.traffic.cars.splice(i, 1);
-    }
-
-    // Siren while any cruiser is active.
-    if (this.stars > 0 && !this.sirenOn) { this.audio.startSiren(); this.sirenOn = true; }
-    if (this.stars === 0 && this.sirenOn) { this.audio.stopSiren(); this.sirenOn = false; }
-
-    // Cruisers chase the player and ram.
-    let nearestDist = Infinity;
-    for (const c of this.cruisers) {
-      const dx = playerPos.x - c.x;
-      const dz = playerPos.z - c.z;
-      const dist = Math.hypot(dx, dz);
-      nearestDist = Math.min(nearestDist, dist);
-      const wantHeading = Math.atan2(dx, dz);
-      let dh = wantHeading - c.heading;
-      while (dh > Math.PI) dh -= Math.PI * 2;
-      while (dh < -Math.PI) dh += Math.PI * 2;
-      c.heading += THREE.MathUtils.clamp(dh, -2.2 * dt, 2.2 * dt);
-      const targetSpeed = dist > 90 ? 30 : 24 + this.stars * 1.5;
-      c.speed += THREE.MathUtils.clamp(targetSpeed - c.speed, -20 * dt, 12 * dt);
-      c.x += Math.sin(c.heading) * c.speed * dt;
-      c.z += Math.cos(c.heading) * c.speed * dt;
-      c.mesh.position.set(c.x, 0, c.z);
-      c.mesh.rotation.y = c.heading;
-      c.sirenPhase += dt * 6;
-      if (c.mesh.userData.lightBar) {
-        c.mesh.userData.lightBar.material.color.setHex(Math.sin(c.sirenPhase) > 0 ? 0xff2222 : 0x2244ff);
+      // Ground pursuit.
+      var px = CV.G.playerPos.x, pz = CV.G.playerPos.z;
+      var nearest = 9999;
+      for (var j = 0; j < policeCars.length; j++) {
+        var car = policeCars[j];
+        var dx = px - car.x, dz = pz - car.z;
+        var d = Math.sqrt(dx * dx + dz * dz);
+        if (d < nearest) nearest = d;
+        var want = Math.atan2(dx, dz);
+        car.heading = CV.angleLerp(car.heading, want, 1 - Math.pow(0.05, dt));
+        var sp = Math.min(CV.TUNE.policeSpeed, CV.TUNE.policeSpeed * (d / 40 + 0.4));
+        var nx = car.x + Math.sin(car.heading) * sp * dt;
+        var nz = car.z + Math.cos(car.heading) * sp * dt;
+        var col = CV.World.collide(nx, nz, 1.6);
+        if (col) {
+          // Slide along the wall instead of sticking.
+          var nx2 = car.x + Math.sin(car.heading) * sp * dt;
+          var nz2 = car.z;
+          var col2 = CV.World.collide(nx2, nz2, 1.6);
+          if (!col2) { nx = nx2; nz = nz2; }
+          else { car.heading += 0.6 * dt * 4; nx = car.x; nz = car.z; }
+        }
+        car.x = nx; car.z = nz;
+        CV.Vehicles.syncMesh(car);
+        // Ram the player.
+        if (d < 3.2) {
+          if (CV.G.driving) {
+            CV.G.driving.speed *= 0.55;
+            if (Math.abs(CV.G.speed) > 10) CV.Audio.thud();
+          } else {
+            CV.Player.damage(6 * dt * 10, 'rammed');
+          }
+        }
       }
-      // Ram the player.
-      if (dist < 4.6) {
-        if (playerInCar) {
-          this.state.shake = Math.min(1, this.state.shake + 0.5);
-          this.audio.crash();
-          c.speed *= 0.4;
-          this.state.playerCar.speed *= 0.7;
+      // Bust meter: fills when a cop is close and the player is slow/on foot.
+      if (wanted > 0 && nearest < CV.TUNE.bustDistance) {
+        var playerSlow = CV.G.driving ? Math.abs(CV.G.speed) < 4 : true;
+        if (playerSlow) {
+          CV.G.bust += CV.TUNE.bustRate * dt;
+          if (CV.G.bust >= 1) this.busted();
+        }
+      } else {
+        CV.G.bust = Math.max(0, CV.G.bust - 0.3 * dt);
+      }
+      // Helicopter at 3+ stars. Heat is a float that decays continuously,
+      // so the heli uses the 2.5 boundary ("around 3 stars") instead of the
+      // integer count — otherwise a 3.0 wanted level decays to 2.98 within
+      // a fraction of a second and the helicopter would never stay up.
+      heatLock = false;
+      if (CV.G.wanted >= 2.5) {
+        if (heli.state === 'off') {
+          heli.state = 'inbound';
+          heli.mesh.visible = true;
+          heli.x = px + 120; heli.z = pz - 120;
+          heli.mesh.position.set(heli.x, CV.TUNE.heliHeight, heli.z);
+          if (CV.HUD) CV.HUD.toast('Police helicopter overhead!');
+        }
+        heli.state = 'tracking';
+        var tx = px, tz = pz;
+        var hdx = tx - heli.x, hdz = tz - heli.z;
+        var hd = Math.sqrt(hdx * hdx + hdz * hdz);
+        if (hd > 4) {
+          var hs = Math.min(CV.TUNE.heliSpeed, hd * 1.5);
+          heli.x += (hdx / hd) * hs * dt;
+          heli.z += (hdz / hd) * hs * dt;
+        }
+        heli.mesh.position.set(heli.x, CV.TUNE.heliHeight + Math.sin(CV.G.time * 1.5) * 1.5, heli.z);
+        heli.mesh.rotation.y = Math.atan2(hdx, hdz);
+        heli.rotor.rotation.y += dt * 22;
+        // Sight: lost inside a cover zone, or far away for 8 seconds.
+        var inCover = CV.inCoverZone(px, pz);
+        if (inCover || hd > 130) {
+          heli.lostTimer += dt;
+          if (heli.lostTimer > 3) {
+            heli.state = 'off';
+            heli.mesh.visible = false;
+            CV.G.wanted = Math.max(0, CV.G.wanted - 2);
+            if (CV.HUD) CV.HUD.toast(inCover ? 'Lost the helicopter in cover!' : 'Lost the helicopter!');
+            CV.Audio.setRotor(false);
+          }
         } else {
-          this.state.damagePlayer(8 * dt * 10, 'police');
+          heli.lostTimer = 0;
+          heatLock = true;   // helicopter keeps the heat on
         }
+        CV.Audio.setRotor(true);
+        CV.G.heliActive = heli.state !== 'off';
+      } else if (heli.state !== 'off') {
+        heli.state = 'off';
+        heli.mesh.visible = false;
+        CV.Audio.setRotor(false);
+        CV.G.heliActive = false;
       }
-    }
-
-    // Bust: slow and close to a cruiser while on foot, or boxed in while driving.
-    if (this.stars > 0 && nearestDist < WANTED.bustRange && playerSpeed < 3) {
-      this.bust += dt / WANTED.bustSeconds;
-      this.state.hud.setBust(this.bust);
-      if (this.bust >= 1) this.state.getBusted();
-    } else {
-      this.bust = Math.max(0, this.bust - dt * 0.5);
-      this.state.hud.setBust(this.bust);
-    }
-
-    // Helicopter at three stars and up: hovers over the player, spotlight on.
-    if (this.stars >= WANTED.heliAtStars) {
-      if (!this.heli) {
-        this.heli = this.buildHelicopter();
-        this.scene.add(this.heli);
+      // Heat decay when no police can see the player.
+      if (wanted > 0 && !heatLock && nearest > 60) {
+        CV.G.wanted = Math.max(0, CV.G.wanted - CV.TUNE.heatDecay * dt);
       }
-      const t = performance.now() / 1000;
-      const hx = playerPos.x + Math.sin(t * 0.35) * 14;
-      const hz = playerPos.z + Math.cos(t * 0.27) * 14;
-      this.heli.position.set(hx, 42 + Math.sin(t * 0.8) * 2, hz);
-      this.heli.rotation.y = Math.atan2(playerPos.x - hx, playerPos.z - hz);
-      this.heli.userData.rotor.rotation.y += dt * 22;
-      if (this.heliLight) this.heliLight.intensity = 900;
-    } else if (this.heli) {
-      this.scene.remove(this.heli);
-      this.heli = null;
-      this.heliLight = null;
-    }
-  }
-}
+      CV.Audio.updateSiren(dt, wanted > 0);
+    },
+    busted: function () {
+      if (CV.G.mode !== 'playing') return;
+      var fine = Math.min(Math.round(CV.G.cash * 0.25), 500);
+      CV.G.cash -= fine;
+      CV.G.wanted = 0; CV.G.bust = 0;
+      CV.G.mode = 'busted';
+      CV.Audio.chime(false);
+      if (CV.HUD) CV.HUD.showBusted(fine);
+      CV.Save.write();
+    },
+    clearAll: function () {
+      for (var i = policeCars.length - 1; i >= 0; i--) CV.Vehicles.remove(policeCars[i]);
+      policeCars.length = 0;
+      if (heli) { heli.state = 'off'; heli.mesh.visible = false; }
+      CV.G.wanted = 0; CV.G.bust = 0; CV.G.heliActive = false;
+    },
+  };
+})();
