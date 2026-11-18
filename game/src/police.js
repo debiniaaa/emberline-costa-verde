@@ -149,8 +149,12 @@
         }
         heli.state = 'tracking';
         if (CV.G.freezeHeli) {
-          // Photo mode: hold the posed position so the helicopter stays in
-          // the frame instead of flying to hover right above the player.
+          // Photo mode: hold a fixed offset AHEAD of the player so the
+          // helicopter stays in the frame as the car drives, instead of
+          // flying to hover right above the player (out of frame).
+          heli.x = px + 10; heli.z = pz + 70;
+          heli.mesh.position.set(heli.x, CV.TUNE.heliHeight, heli.z);
+          heli.mesh.rotation.y = Math.atan2(px - heli.x, pz - heli.z);
           heli.rotor.rotation.y += dt * 22;
           CV.Audio.setRotor(true);
           CV.G.heliActive = true;

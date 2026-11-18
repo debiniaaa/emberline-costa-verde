@@ -58,7 +58,7 @@
           car2.x = 0; car2.z = 0; car2.heading = 0; car2.speed = 30;
           CV.G.playerPos.x = 0; CV.G.playerPos.z = 0;
           CV.G.playerHeading = 0;
-          CV.Player.setCamera(0.35, 0.3, 13);
+          CV.Player.setCamera(0.35, 0.22, 13);
         }
         CV.G.wanted = 4;
         // One cruiser ahead-right (visible in frame) and one behind, closing in.
